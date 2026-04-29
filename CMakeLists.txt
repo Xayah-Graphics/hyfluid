@@ -37,32 +37,57 @@ endif ()
 find_package(CUDAToolkit 13.2 REQUIRED)
 
 set(HYFLUID_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1")
-set(HYFLUID_FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${HYFLUID_FFMPEG_NAME}.zip")
+if (WIN32)
+    set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1")
+    set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "zip")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HYFLUID_SYSTEM_PROCESSOR)
+    if (HYFLUID_SYSTEM_PROCESSOR STREQUAL "x86_64" OR HYFLUID_SYSTEM_PROCESSOR STREQUAL "amd64")
+        set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-latest-linux64-lgpl-shared-8.1")
+        set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "tar.xz")
+    else ()
+        message(FATAL_ERROR "Unsupported Linux processor for vendor FFmpeg: ${CMAKE_SYSTEM_PROCESSOR}")
+    endif ()
+else ()
+    message(FATAL_ERROR "Unsupported platform for vendor FFmpeg: ${CMAKE_SYSTEM_NAME}")
+endif ()
+set(HYFLUID_FFMPEG_ARCHIVE_NAME "${HYFLUID_FFMPEG_NAME}.${HYFLUID_FFMPEG_ARCHIVE_EXTENSION}")
+string(REPLACE "." "\\." HYFLUID_FFMPEG_ARCHIVE_REGEX "${HYFLUID_FFMPEG_ARCHIVE_NAME}")
+set(HYFLUID_FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
 set(HYFLUID_FFMPEG_CHECKSUMS_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256")
 set(HYFLUID_FFMPEG_VENDOR_DIR "${HYFLUID_VENDOR_DIR}/ffmpeg")
-set(HYFLUID_FFMPEG_ARCHIVE "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_NAME}.zip")
+set(HYFLUID_FFMPEG_ARCHIVE "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
 set(HYFLUID_FFMPEG_CHECKSUMS "${HYFLUID_FFMPEG_VENDOR_DIR}/checksums.sha256")
 set(HYFLUID_FFMPEG_EXTRACT_DIR "${HYFLUID_FFMPEG_VENDOR_DIR}/extract")
-set(HYFLUID_FFMPEG_MARKER "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_NAME}.sha256")
+set(HYFLUID_FFMPEG_MARKER "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}.sha256")
 set(HYFLUID_FFMPEG_ROOT "${HYFLUID_FFMPEG_EXTRACT_DIR}/${HYFLUID_FFMPEG_NAME}")
 set(HYFLUID_FFMPEG_INCLUDE_DIR "${HYFLUID_FFMPEG_ROOT}/include")
 set(HYFLUID_FFMPEG_LIB_DIR "${HYFLUID_FFMPEG_ROOT}/lib")
 set(HYFLUID_FFMPEG_BIN_DIR "${HYFLUID_FFMPEG_ROOT}/bin")
-set(HYFLUID_FFMPEG_LIBRARIES
-        "${HYFLUID_FFMPEG_LIB_DIR}/avformat.lib"
-        "${HYFLUID_FFMPEG_LIB_DIR}/avcodec.lib"
-        "${HYFLUID_FFMPEG_LIB_DIR}/swscale.lib"
-        "${HYFLUID_FFMPEG_LIB_DIR}/swresample.lib"
-        "${HYFLUID_FFMPEG_LIB_DIR}/avutil.lib"
-)
-set(HYFLUID_FFMPEG_RUNTIME_FILES
-        "${HYFLUID_FFMPEG_BIN_DIR}/avformat-62.dll"
-        "${HYFLUID_FFMPEG_BIN_DIR}/avcodec-62.dll"
-        "${HYFLUID_FFMPEG_BIN_DIR}/swscale-9.dll"
-        "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
-        "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
-)
+if (WIN32)
+    set(HYFLUID_FFMPEG_LIBRARIES
+            "${HYFLUID_FFMPEG_LIB_DIR}/avformat.lib"
+            "${HYFLUID_FFMPEG_LIB_DIR}/avcodec.lib"
+            "${HYFLUID_FFMPEG_LIB_DIR}/swscale.lib"
+            "${HYFLUID_FFMPEG_LIB_DIR}/swresample.lib"
+            "${HYFLUID_FFMPEG_LIB_DIR}/avutil.lib"
+    )
+    set(HYFLUID_FFMPEG_RUNTIME_FILES
+            "${HYFLUID_FFMPEG_BIN_DIR}/avformat-62.dll"
+            "${HYFLUID_FFMPEG_BIN_DIR}/avcodec-62.dll"
+            "${HYFLUID_FFMPEG_BIN_DIR}/swscale-9.dll"
+            "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
+            "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
+    )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(HYFLUID_FFMPEG_LIBRARIES
+            "${HYFLUID_FFMPEG_LIB_DIR}/libavformat.so"
+            "${HYFLUID_FFMPEG_LIB_DIR}/libavcodec.so"
+            "${HYFLUID_FFMPEG_LIB_DIR}/libswscale.so"
+            "${HYFLUID_FFMPEG_LIB_DIR}/libswresample.so"
+            "${HYFLUID_FFMPEG_LIB_DIR}/libavutil.so"
+    )
+endif ()
 
 file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_VENDOR_DIR}")
 message(STATUS "Downloading ${HYFLUID_FFMPEG_CHECKSUMS_URL}")
@@ -79,14 +104,14 @@ if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
 endif ()
 
 file(READ "${HYFLUID_FFMPEG_CHECKSUMS}" HYFLUID_FFMPEG_CHECKSUM_TEXT)
-string(REGEX MATCH "[0-9a-fA-F]+  ${HYFLUID_FFMPEG_NAME}\\.zip" HYFLUID_FFMPEG_CHECKSUM_MATCH "${HYFLUID_FFMPEG_CHECKSUM_TEXT}")
+string(REGEX MATCH "[0-9a-fA-F]+  ${HYFLUID_FFMPEG_ARCHIVE_REGEX}" HYFLUID_FFMPEG_CHECKSUM_MATCH "${HYFLUID_FFMPEG_CHECKSUM_TEXT}")
 if (NOT HYFLUID_FFMPEG_CHECKSUM_MATCH)
-    message(FATAL_ERROR "Failed to find ${HYFLUID_FFMPEG_NAME}.zip in ${HYFLUID_FFMPEG_CHECKSUMS}")
+    message(FATAL_ERROR "Failed to find ${HYFLUID_FFMPEG_ARCHIVE_NAME} in ${HYFLUID_FFMPEG_CHECKSUMS}")
 endif ()
-string(REGEX REPLACE "  ${HYFLUID_FFMPEG_NAME}\\.zip" "" HYFLUID_FFMPEG_SHA256 "${HYFLUID_FFMPEG_CHECKSUM_MATCH}")
+string(REGEX REPLACE "  ${HYFLUID_FFMPEG_ARCHIVE_REGEX}" "" HYFLUID_FFMPEG_SHA256 "${HYFLUID_FFMPEG_CHECKSUM_MATCH}")
 string(LENGTH "${HYFLUID_FFMPEG_SHA256}" HYFLUID_FFMPEG_SHA256_LENGTH)
 if (NOT HYFLUID_FFMPEG_SHA256_LENGTH EQUAL 64)
-    message(FATAL_ERROR "Invalid SHA256 for ${HYFLUID_FFMPEG_NAME}.zip in ${HYFLUID_FFMPEG_CHECKSUMS}")
+    message(FATAL_ERROR "Invalid SHA256 for ${HYFLUID_FFMPEG_ARCHIVE_NAME} in ${HYFLUID_FFMPEG_CHECKSUMS}")
 endif ()
 
 message(STATUS "Downloading ${HYFLUID_FFMPEG_URL}")
@@ -155,7 +180,7 @@ else ()
             "${HYFLUID_STB_IMAGE_HEADER}"
             TLS_VERIFY ON
             STATUS HYFLUID_DOWNLOAD_STATUS
-)
+    )
     list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
     list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
     if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
@@ -174,7 +199,7 @@ else ()
             "${HYFLUID_STB_IMAGE_WRITE_HEADER}"
             TLS_VERIFY ON
             STATUS HYFLUID_DOWNLOAD_STATUS
-)
+    )
     list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
     list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
     if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
@@ -208,8 +233,12 @@ set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 # ============================================================================
 add_executable(hyfluid-app main.cpp)
 target_link_libraries(hyfluid-app PRIVATE hyfluid)
-add_custom_command(
-        TARGET hyfluid-app POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-app>"
-)
+if (WIN32)
+    add_custom_command(
+            TARGET hyfluid-app POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-app>"
+    )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_property(TARGET hyfluid-app PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+endif ()
 set_property(TARGET hyfluid-app PROPERTY CXX_MODULE_STD ON)
