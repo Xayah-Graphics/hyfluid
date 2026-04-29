@@ -36,6 +36,33 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
+set(HYFLUID_FFMPEG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
+set(HYFLUID_FFMPEG_INCLUDE_DIR "${HYFLUID_FFMPEG_ROOT}/include")
+set(HYFLUID_FFMPEG_LIB_DIR "${HYFLUID_FFMPEG_ROOT}/lib")
+set(HYFLUID_FFMPEG_BIN_DIR "${HYFLUID_FFMPEG_ROOT}/bin")
+set(HYFLUID_FFMPEG_LIBRARIES
+        "${HYFLUID_FFMPEG_LIB_DIR}/avformat.lib"
+        "${HYFLUID_FFMPEG_LIB_DIR}/avcodec.lib"
+        "${HYFLUID_FFMPEG_LIB_DIR}/swscale.lib"
+        "${HYFLUID_FFMPEG_LIB_DIR}/swresample.lib"
+        "${HYFLUID_FFMPEG_LIB_DIR}/avutil.lib"
+)
+set(HYFLUID_FFMPEG_RUNTIME_FILES
+        "${HYFLUID_FFMPEG_BIN_DIR}/avformat-62.dll"
+        "${HYFLUID_FFMPEG_BIN_DIR}/avcodec-62.dll"
+        "${HYFLUID_FFMPEG_BIN_DIR}/swscale-9.dll"
+        "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
+        "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
+)
+if (NOT IS_DIRECTORY "${HYFLUID_FFMPEG_INCLUDE_DIR}")
+    message(FATAL_ERROR "Repository FFmpeg include directory is missing: ${HYFLUID_FFMPEG_INCLUDE_DIR}")
+endif ()
+foreach (HYFLUID_FFMPEG_FILE IN LISTS HYFLUID_FFMPEG_LIBRARIES HYFLUID_FFMPEG_RUNTIME_FILES)
+    if (NOT EXISTS "${HYFLUID_FFMPEG_FILE}")
+        message(FATAL_ERROR "Repository FFmpeg file is missing: ${HYFLUID_FFMPEG_FILE}")
+    endif ()
+endforeach ()
+
 function(download_if_needed url out_path)
     if (EXISTS "${out_path}")
         message(STATUS "Using cached file: ${out_path}")
@@ -89,8 +116,8 @@ target_sources(
         ngp.dataset.ixx
         ngp.train.ixx
 )
-target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-target_link_libraries(hyfluid PRIVATE CUDA::cublas CUDA::cublasLt)
+target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
+target_link_libraries(hyfluid PRIVATE CUDA::cudart ${HYFLUID_FFMPEG_LIBRARIES})
 set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 
 
@@ -99,4 +126,8 @@ set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 # ============================================================================
 add_executable(hyfluid-app main.cpp)
 target_link_libraries(hyfluid-app PRIVATE hyfluid)
+add_custom_command(
+        TARGET hyfluid-app POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-app>"
+)
 set_property(TARGET hyfluid-app PROPERTY CXX_MODULE_STD ON)
