@@ -3,12 +3,19 @@ module;
 #include <cstring>
 
 #include "json/json.hpp"
-module hyfluid.dataset;
+module ngp.dataset;
 import std;
 
-namespace hyfluid::dataset {
+namespace ngp::dataset {
     std::expected<ScalarRealDataset, std::string> load_scalar_real(const std::filesystem::path& path) {
         try {
+            constexpr float bbox_min_x = 0.15f;
+            constexpr float bbox_min_y = 0.0f;
+            constexpr float bbox_min_z = 0.15f;
+            constexpr float bbox_max_x = 0.85f;
+            constexpr float bbox_max_y = 1.0f;
+            constexpr float bbox_max_z = 0.85f;
+
             if (path.empty()) throw std::runtime_error{"dataset path must not be empty."};
             if (!std::filesystem::is_directory(path)) throw std::runtime_error{std::format("dataset path '{}' is not a directory.", path.string())};
 
@@ -79,8 +86,9 @@ namespace hyfluid::dataset {
                 const nlohmann::json& videos_json = json.at(split_names[split_index]);
                 if (!videos_json.is_array() || videos_json.empty()) throw std::runtime_error{std::format("ScalarReal info.json must contain a non-empty {} array.", split_names[split_index])};
 
-                std::vector<ScalarRealVideo>& destination = split_index == 0 ? dataset.train : dataset.test;
-                destination.reserve(videos_json.size());
+                std::vector<ScalarRealVideo>& video_destination = split_index == 0 ? dataset.train_videos : dataset.test_videos;
+                std::vector<ScalarRealFrame>& frame_destination = split_index == 0 ? dataset.train : dataset.test;
+                video_destination.reserve(videos_json.size());
 
                 for (const nlohmann::json& video_json : videos_json) {
                     ScalarRealVideo video      = {};
@@ -94,9 +102,30 @@ namespace hyfluid::dataset {
                     if (!std::isfinite(camera_angle_x) || camera_angle_x <= 0.0f) throw std::runtime_error{std::format("{} declares invalid camera_angle_x.", video.file_name)};
                     if (video_json.contains("transform_matrix_list")) throw std::runtime_error{std::format("{} uses transform_matrix_list; this HyFluid density implementation expects one static transform_matrix per video.", video.file_name)};
 
+                    std::array<float, 16> raw_camera  = {};
                     const nlohmann::json& camera_json = video_json.at("transform_matrix");
                     for (std::size_t row = 0; row < 4; ++row)
-                        for (std::size_t column = 0; column < 4; ++column) video.camera[row * 4 + column] = camera_json.at(row).at(column).get<float>();
+                        for (std::size_t column = 0; column < 4; ++column) raw_camera[row * 4 + column] = camera_json.at(row).at(column).get<float>();
+                    const std::array<float, 3> raw_origin              = {raw_camera[3], raw_camera[7], raw_camera[11]};
+                    const std::array<std::array<float, 3>, 3> raw_axes = {{
+                        {raw_camera[0], raw_camera[4], raw_camera[8]},
+                        {-raw_camera[1], -raw_camera[5], -raw_camera[9]},
+                        {-raw_camera[2], -raw_camera[6], -raw_camera[10]},
+                    }};
+                    const float origin_sim_x                           = (dataset.world_to_sim[0] * raw_origin[0] + dataset.world_to_sim[1] * raw_origin[1] + dataset.world_to_sim[2] * raw_origin[2] + dataset.world_to_sim[3]) / dataset.voxel_scale[0];
+                    const float origin_sim_y                           = (dataset.world_to_sim[4] * raw_origin[0] + dataset.world_to_sim[5] * raw_origin[1] + dataset.world_to_sim[6] * raw_origin[2] + dataset.world_to_sim[7]) / dataset.voxel_scale[1];
+                    const float origin_sim_z                           = (dataset.world_to_sim[8] * raw_origin[0] + dataset.world_to_sim[9] * raw_origin[1] + dataset.world_to_sim[10] * raw_origin[2] + dataset.world_to_sim[11]) / dataset.voxel_scale[2];
+                    video.camera[9]                                    = (origin_sim_x - bbox_min_x) / (bbox_max_x - bbox_min_x);
+                    video.camera[10]                                   = (origin_sim_y - bbox_min_y) / (bbox_max_y - bbox_min_y);
+                    video.camera[11]                                   = (origin_sim_z - bbox_min_z) / (bbox_max_z - bbox_min_z);
+                    for (std::size_t axis = 0; axis < 3; ++axis) {
+                        const float axis_sim_x     = (dataset.world_to_sim[0] * raw_axes[axis][0] + dataset.world_to_sim[1] * raw_axes[axis][1] + dataset.world_to_sim[2] * raw_axes[axis][2]) / dataset.voxel_scale[0];
+                        const float axis_sim_y     = (dataset.world_to_sim[4] * raw_axes[axis][0] + dataset.world_to_sim[5] * raw_axes[axis][1] + dataset.world_to_sim[6] * raw_axes[axis][2]) / dataset.voxel_scale[1];
+                        const float axis_sim_z     = (dataset.world_to_sim[8] * raw_axes[axis][0] + dataset.world_to_sim[9] * raw_axes[axis][1] + dataset.world_to_sim[10] * raw_axes[axis][2]) / dataset.voxel_scale[2];
+                        video.camera[axis * 3 + 0] = axis_sim_x / (bbox_max_x - bbox_min_x);
+                        video.camera[axis * 3 + 1] = axis_sim_y / (bbox_max_y - bbox_min_y);
+                        video.camera[axis * 3 + 2] = axis_sim_z / (bbox_max_z - bbox_min_z);
+                    }
 
                     AVFormatContext* format_context        = nullptr;
                     const std::filesystem::path video_path = path / video.file_name;
@@ -208,20 +237,43 @@ namespace hyfluid::dataset {
                     avcodec_free_context(&codec_context);
                     avformat_close_input(&format_context);
 
-                    if (!destination.empty()) {
-                        const ScalarRealVideo& first = destination.front();
+                    if (!video_destination.empty()) {
+                        const ScalarRealVideo& first = video_destination.front();
                         if (video.width != first.width || video.height != first.height) throw std::runtime_error{"ScalarReal videos must share one resolution."};
                         if (video.frame_count != first.frame_count) throw std::runtime_error{"ScalarReal videos must share one frame count."};
                     }
-                    destination.push_back(std::move(video));
+                    const std::size_t source_video_index = video_destination.size();
+                    for (std::uint32_t frame_index = 0u; frame_index < video.frame_count; ++frame_index) {
+                        ScalarRealFrame frame = {};
+                        frame.file_name       = std::format("{}#{:04}", video.file_name, frame_index);
+                        frame.camera          = video.camera;
+                        frame.width           = video.width;
+                        frame.height          = video.height;
+                        frame.focal_x         = video.focal;
+                        frame.focal_y         = video.focal;
+                        frame.principal_x     = static_cast<float>(video.width) * 0.5f;
+                        frame.principal_y     = static_cast<float>(video.height) * 0.5f;
+                        frame.time            = video.frame_count > 1u ? static_cast<float>(frame_index) / static_cast<float>(video.frame_count - 1u) : 0.0f;
+                        frame.rgba.resize(static_cast<std::size_t>(video.width) * video.height * 4);
+                        const std::uint8_t* rgb_begin = video.rgb.data() + static_cast<std::uint64_t>(frame_index) * video.width * video.height * 3ull;
+                        for (std::uint64_t pixel = 0; pixel < static_cast<std::uint64_t>(video.width) * video.height; ++pixel) {
+                            frame.rgba[pixel * 4ull + 0ull] = rgb_begin[pixel * 3ull + 0ull];
+                            frame.rgba[pixel * 4ull + 1ull] = rgb_begin[pixel * 3ull + 1ull];
+                            frame.rgba[pixel * 4ull + 2ull] = rgb_begin[pixel * 3ull + 2ull];
+                            frame.rgba[pixel * 4ull + 3ull] = 255u;
+                        }
+                        if (source_video_index > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"too many ScalarReal videos."};
+                        frame_destination.push_back(std::move(frame));
+                    }
+                    video_destination.push_back(std::move(video));
                 }
             }
 
-            if (dataset.train.empty()) throw std::runtime_error{"ScalarReal train_videos is empty."};
-            if (dataset.test.empty()) throw std::runtime_error{"ScalarReal test_videos is empty."};
+            if (dataset.train_videos.empty() || dataset.train.empty()) throw std::runtime_error{"ScalarReal train_videos is empty."};
+            if (dataset.test_videos.empty() || dataset.test.empty()) throw std::runtime_error{"ScalarReal test_videos is empty."};
             return dataset;
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
         }
     }
-} // namespace hyfluid::dataset
+} // namespace ngp::dataset

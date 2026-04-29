@@ -205,7 +205,7 @@ target_sources(
         ngp.train.ixx
 )
 target_include_directories(hyfluid PRIVATE "${HYFLUID_VENDOR_DIR}" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
-target_link_libraries(hyfluid PRIVATE CUDA::cudart ${HYFLUID_FFMPEG_LIBRARIES})
+target_link_libraries(hyfluid PRIVATE CUDA::cudart CUDA::cublas CUDA::cublasLt ${HYFLUID_FFMPEG_LIBRARIES})
 set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 
 

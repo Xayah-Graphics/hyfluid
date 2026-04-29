@@ -1,6 +1,6 @@
 import std;
-import hyfluid.dataset;
-import hyfluid.train;
+import ngp.dataset;
+import ngp.train;
 
 namespace {
     constexpr std::string_view ansi_reset  = "\x1b[0m";
@@ -16,10 +16,7 @@ namespace {
         std::filesystem::path test_output_dir = "test";
         std::int32_t steps                    = 50000;
         std::int32_t chunk_steps              = 100;
-        std::uint32_t rays_per_step           = 1024u;
-        std::uint32_t samples_per_ray         = 192u;
         std::uint32_t test_frame_limit        = 1u;
-        float learning_rate                   = 5e-4f;
         std::optional<std::filesystem::path> load_weights_path;
         std::optional<std::filesystem::path> export_weights_path;
     };
@@ -39,25 +36,19 @@ int main(const int argc, const char* const* const argv) {
                                {}default:{} 50000
   {}--chunk-steps <count>{}        training steps per log line
                                {}default:{} 100
-  {}--rays-per-step <count>{}      random rays per optimizer step
-                               {}default:{} 1024
-  {}--samples-per-ray <count>{}    uniform density samples per ray
-                               {}default:{} 192
   {}--test-frames <count>{}        test frames per test view
                                {}default:{} 1
   {}--test-output <path>{}         output directory for comparison PNGs
                                {}default:{} test
-  {}--learning-rate <value>{}      base RAdam learning rate
-                               {}default:{} 5e-4
-  {}--load-weights <path>{}        load hyfluid-density.v1 weights before training
-  {}--export-weights <path>{}      export hyfluid-density.v1 weights after testing
+  {}--load-weights <path>{}        load dynamic instant-ngp weights before training
+  {}--export-weights <path>{}      export dynamic instant-ngp weights after testing
   {}-h, --help{}                   print this help
 
 {}Examples:{}
   {}{}{} --dataset data/ScalarReal --steps 1000
   {}{}{} --steps 1 --chunk-steps 1 --test-frames 1
 )",
-        ansi_bold, ansi_reset, ansi_cyan, executable_name, ansi_reset, ansi_dim, ansi_reset, ansi_bold, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_green, ansi_reset, ansi_green, ansi_reset, ansi_bold, ansi_reset, ansi_cyan, executable_name, ansi_reset, ansi_cyan, executable_name, ansi_reset);
+        ansi_bold, ansi_reset, ansi_cyan, executable_name, ansi_reset, ansi_dim, ansi_reset, ansi_bold, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_dim, ansi_reset, ansi_green, ansi_reset, ansi_green, ansi_reset, ansi_green, ansi_reset, ansi_bold, ansi_reset, ansi_cyan, executable_name, ansi_reset, ansi_cyan, executable_name, ansi_reset);
 
     CliOptions cli = {};
     std::optional<std::string> error;
@@ -94,7 +85,7 @@ int main(const int argc, const char* const* const argv) {
             if (option == "--test-output") cli.test_output_dir = std::filesystem::path{value};
             if (option == "--load-weights") cli.load_weights_path = std::filesystem::path{value};
             if (option == "--export-weights") cli.export_weights_path = std::filesystem::path{value};
-        } else if (option == "--steps" || option == "--chunk-steps" || option == "--rays-per-step" || option == "--samples-per-ray" || option == "--test-frames") {
+        } else if (option == "--steps" || option == "--chunk-steps" || option == "--test-frames") {
             std::string_view value;
             if (inline_value.has_value())
                 value = *inline_value;
@@ -112,25 +103,7 @@ int main(const int argc, const char* const* const argv) {
             }
             if (option == "--steps") cli.steps = static_cast<std::int32_t>(parsed);
             if (option == "--chunk-steps") cli.chunk_steps = static_cast<std::int32_t>(parsed);
-            if (option == "--rays-per-step") cli.rays_per_step = parsed;
-            if (option == "--samples-per-ray") cli.samples_per_ray = parsed;
             if (option == "--test-frames") cli.test_frame_limit = parsed;
-        } else if (option == "--learning-rate") {
-            std::string_view value;
-            if (inline_value.has_value())
-                value = *inline_value;
-            else if (i + 1 < arguments.size())
-                value = arguments[++i];
-            else {
-                error = std::format("{} requires a value.", option);
-                continue;
-            }
-            float parsed      = 0.0f;
-            const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
-            if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || !std::isfinite(parsed) || parsed <= 0.0f)
-                error = "--learning-rate must be a positive finite value.";
-            else
-                cli.learning_rate = parsed;
         } else {
             error = std::format("unknown argument '{}'.", argument);
         }
@@ -154,32 +127,29 @@ int main(const int argc, const char* const* const argv) {
     }
 
     const auto config_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    std::println("{}[{:%F %T}]{} {}{:<7}{} dataset={} steps={} chunk={} rays={} samples={} test_frames={} test_output={} lr={} load_weights={} export_weights={}", ansi_dim, config_timestamp, ansi_reset, ansi_cyan, "CONFIG", ansi_reset, cli.dataset_path.string(), cli.steps, cli.chunk_steps, cli.rays_per_step, cli.samples_per_ray, cli.test_frame_limit, cli.test_output_dir.string(), cli.learning_rate, cli.load_weights_path.has_value() ? cli.load_weights_path->string() : "none", cli.export_weights_path.has_value() ? cli.export_weights_path->string() : "none");
+    std::println("{}[{:%F %T}]{} {}{:<7}{} dataset={} steps={} chunk={} test_frames={} test_output={} load_weights={} export_weights={}", ansi_dim, config_timestamp, ansi_reset, ansi_cyan, "CONFIG", ansi_reset, cli.dataset_path.string(), cli.steps, cli.chunk_steps, cli.test_frame_limit, cli.test_output_dir.string(), cli.load_weights_path.has_value() ? cli.load_weights_path->string() : "none", cli.export_weights_path.has_value() ? cli.export_weights_path->string() : "none");
 
     std::optional<std::string> pipeline_error;
-    std::unique_ptr<hyfluid::train::HyFluidDensity> density;
+    std::unique_ptr<ngp::train::InstantNGP> instant_ngp;
     const auto load_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     std::println("{}[{:%F %T}]{} {}{:<7}{} loading ScalarReal videos with FFmpeg", ansi_dim, load_timestamp, ansi_reset, ansi_cyan, "INFO", ansi_reset);
 
-    const auto dataset = hyfluid::dataset::load_scalar_real(cli.dataset_path);
+    const auto dataset = ngp::dataset::load_scalar_real(cli.dataset_path);
     if (!dataset) {
         pipeline_error = dataset.error();
     } else {
         try {
-            hyfluid::train::TrainOptions options = {};
-            options.rays_per_step                = cli.rays_per_step;
-            options.samples_per_ray              = cli.samples_per_ray;
-            options.test_frame_limit             = cli.test_frame_limit;
-            options.test_output_dir              = cli.test_output_dir;
-            options.learning_rate                = cli.learning_rate;
-            density                              = std::make_unique<hyfluid::train::HyFluidDensity>(*dataset, options);
+            ngp::train::TrainOptions options = {};
+            options.test_frame_limit         = cli.test_frame_limit;
+            options.test_output_dir          = cli.test_output_dir;
+            instant_ngp                      = std::make_unique<ngp::train::InstantNGP>(*dataset, options);
         } catch (const std::exception& exception) {
             pipeline_error = exception.what();
         }
     }
 
     if (!pipeline_error && cli.load_weights_path.has_value()) {
-        const auto loaded = density->load_weights(*cli.load_weights_path);
+        const auto loaded = instant_ngp->load_weights(*cli.load_weights_path);
         if (!loaded)
             pipeline_error = loaded.error();
         else
@@ -193,7 +163,7 @@ int main(const int argc, const char* const* const argv) {
     if (!pipeline_error) {
         for (std::int32_t trained_steps = 0; trained_steps < cli.steps;) {
             const std::int32_t requested_steps = std::min(cli.chunk_steps, cli.steps - trained_steps);
-            const auto stats                   = density->train(requested_steps);
+            const auto stats                   = instant_ngp->train(requested_steps);
             if (!stats) {
                 pipeline_error = stats.error();
                 break;
@@ -204,14 +174,14 @@ int main(const int argc, const char* const* const argv) {
             final_step = stats->step;
             trained_steps += requested_steps;
             const auto train_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-            std::println("{}[{:%F %T}]{} {}{:<7}{} step={:>6}/{} loss={:.8f} chunk={:.3f}ms rate={:.2f} step/s rays={} samples={} occ_bin={} occ_cells={} occ={:.6f} occ_update={:.3f}ms skipped={}", ansi_dim, train_timestamp, ansi_reset, ansi_green, "TRAIN", ansi_reset, stats->step, cli.steps, stats->loss, stats->elapsed_ms, static_cast<float>(requested_steps) * 1000.0f / stats->elapsed_ms, stats->rays_per_step, stats->samples_per_ray, stats->occupancy_bin, stats->occupancy_occupied_cells, stats->occupancy_ratio, stats->occupancy_update_ms, stats->occupancy_skipped_samples);
+            std::println("{}[{:%F %T}]{} {}{:<7}{} step={:>6}/{} loss={:.8f} chunk={:.3f}ms rate={:.2f} step/s rays={} samples={} compacted={} occ_cells={} occ={:.6f} occ_update={:.3f}ms", ansi_dim, train_timestamp, ansi_reset, ansi_green, "TRAIN", ansi_reset, stats->step, cli.steps, stats->loss, stats->elapsed_ms, static_cast<float>(requested_steps) * 1000.0f / stats->elapsed_ms, stats->rays_per_batch, stats->measured_sample_count_before_compaction, stats->measured_sample_count, stats->density_grid_occupied_cells, stats->density_grid_occupancy_ratio, stats->density_grid_update_ms);
         }
     }
 
     if (!pipeline_error) {
         const auto summary_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
         std::println("{}[{:%F %T}]{} {}{:<7}{} steps={} first_loss={:.8f} last_loss={:.8f} train={:.3f}s avg={:.2f} step/s", ansi_dim, summary_timestamp, ansi_reset, ansi_bold, "SUMMARY", ansi_reset, final_step, first_loss, last_loss, total_train_ms * 0.001f, static_cast<float>(final_step) * 1000.0f / total_train_ms);
-        const auto test = density->test();
+        const auto test = instant_ngp->test();
         if (!test) {
             pipeline_error = test.error();
         } else {
@@ -221,7 +191,7 @@ int main(const int argc, const char* const* const argv) {
     }
 
     if (!pipeline_error && cli.export_weights_path.has_value()) {
-        const auto exported = density->export_weights(*cli.export_weights_path);
+        const auto exported = instant_ngp->export_weights(*cli.export_weights_path);
         if (!exported)
             pipeline_error = exported.error();
         else
