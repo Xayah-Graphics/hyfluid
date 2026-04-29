@@ -36,7 +36,16 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
-set(HYFLUID_FFMPEG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
+set(HYFLUID_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1")
+set(HYFLUID_FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${HYFLUID_FFMPEG_NAME}.zip")
+set(HYFLUID_FFMPEG_CHECKSUMS_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256")
+set(HYFLUID_FFMPEG_VENDOR_DIR "${HYFLUID_VENDOR_DIR}/ffmpeg")
+set(HYFLUID_FFMPEG_ARCHIVE "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_NAME}.zip")
+set(HYFLUID_FFMPEG_CHECKSUMS "${HYFLUID_FFMPEG_VENDOR_DIR}/checksums.sha256")
+set(HYFLUID_FFMPEG_EXTRACT_DIR "${HYFLUID_FFMPEG_VENDOR_DIR}/extract")
+set(HYFLUID_FFMPEG_MARKER "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_NAME}.sha256")
+set(HYFLUID_FFMPEG_ROOT "${HYFLUID_FFMPEG_EXTRACT_DIR}/${HYFLUID_FFMPEG_NAME}")
 set(HYFLUID_FFMPEG_INCLUDE_DIR "${HYFLUID_FFMPEG_ROOT}/include")
 set(HYFLUID_FFMPEG_LIB_DIR "${HYFLUID_FFMPEG_ROOT}/lib")
 set(HYFLUID_FFMPEG_BIN_DIR "${HYFLUID_FFMPEG_ROOT}/bin")
@@ -54,51 +63,124 @@ set(HYFLUID_FFMPEG_RUNTIME_FILES
         "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
         "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
 )
+
+file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_VENDOR_DIR}")
+message(STATUS "Downloading ${HYFLUID_FFMPEG_CHECKSUMS_URL}")
+file(DOWNLOAD
+        "${HYFLUID_FFMPEG_CHECKSUMS_URL}"
+        "${HYFLUID_FFMPEG_CHECKSUMS}"
+        TLS_VERIFY ON
+        STATUS HYFLUID_DOWNLOAD_STATUS
+)
+list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+    message(FATAL_ERROR "Failed to download ${HYFLUID_FFMPEG_CHECKSUMS_URL}: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+endif ()
+
+file(READ "${HYFLUID_FFMPEG_CHECKSUMS}" HYFLUID_FFMPEG_CHECKSUM_TEXT)
+string(REGEX MATCH "[0-9a-fA-F]+  ${HYFLUID_FFMPEG_NAME}\\.zip" HYFLUID_FFMPEG_CHECKSUM_MATCH "${HYFLUID_FFMPEG_CHECKSUM_TEXT}")
+if (NOT HYFLUID_FFMPEG_CHECKSUM_MATCH)
+    message(FATAL_ERROR "Failed to find ${HYFLUID_FFMPEG_NAME}.zip in ${HYFLUID_FFMPEG_CHECKSUMS}")
+endif ()
+string(REGEX REPLACE "  ${HYFLUID_FFMPEG_NAME}\\.zip" "" HYFLUID_FFMPEG_SHA256 "${HYFLUID_FFMPEG_CHECKSUM_MATCH}")
+string(LENGTH "${HYFLUID_FFMPEG_SHA256}" HYFLUID_FFMPEG_SHA256_LENGTH)
+if (NOT HYFLUID_FFMPEG_SHA256_LENGTH EQUAL 64)
+    message(FATAL_ERROR "Invalid SHA256 for ${HYFLUID_FFMPEG_NAME}.zip in ${HYFLUID_FFMPEG_CHECKSUMS}")
+endif ()
+
+message(STATUS "Downloading ${HYFLUID_FFMPEG_URL}")
+file(DOWNLOAD
+        "${HYFLUID_FFMPEG_URL}"
+        "${HYFLUID_FFMPEG_ARCHIVE}"
+        EXPECTED_HASH "SHA256=${HYFLUID_FFMPEG_SHA256}"
+        TLS_VERIFY ON
+        STATUS HYFLUID_DOWNLOAD_STATUS
+)
+list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+    message(FATAL_ERROR "Failed to download ${HYFLUID_FFMPEG_URL}: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+endif ()
+
+set(HYFLUID_FFMPEG_EXISTING_SHA256 "")
+if (EXISTS "${HYFLUID_FFMPEG_MARKER}")
+    file(READ "${HYFLUID_FFMPEG_MARKER}" HYFLUID_FFMPEG_EXISTING_SHA256)
+    string(STRIP "${HYFLUID_FFMPEG_EXISTING_SHA256}" HYFLUID_FFMPEG_EXISTING_SHA256)
+endif ()
+if (NOT HYFLUID_FFMPEG_EXISTING_SHA256 STREQUAL HYFLUID_FFMPEG_SHA256)
+    message(STATUS "Extracting ${HYFLUID_FFMPEG_ARCHIVE}")
+    file(REMOVE_RECURSE "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+    file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+    file(ARCHIVE_EXTRACT INPUT "${HYFLUID_FFMPEG_ARCHIVE}" DESTINATION "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+    file(WRITE "${HYFLUID_FFMPEG_MARKER}" "${HYFLUID_FFMPEG_SHA256}\n")
+endif ()
+
 if (NOT IS_DIRECTORY "${HYFLUID_FFMPEG_INCLUDE_DIR}")
-    message(FATAL_ERROR "Repository FFmpeg include directory is missing: ${HYFLUID_FFMPEG_INCLUDE_DIR}")
+    message(FATAL_ERROR "Vendor FFmpeg include directory is missing: ${HYFLUID_FFMPEG_INCLUDE_DIR}")
 endif ()
 foreach (HYFLUID_FFMPEG_FILE IN LISTS HYFLUID_FFMPEG_LIBRARIES HYFLUID_FFMPEG_RUNTIME_FILES)
     if (NOT EXISTS "${HYFLUID_FFMPEG_FILE}")
-        message(FATAL_ERROR "Repository FFmpeg file is missing: ${HYFLUID_FFMPEG_FILE}")
+        message(FATAL_ERROR "Vendor FFmpeg file is missing: ${HYFLUID_FFMPEG_FILE}")
     endif ()
 endforeach ()
 
-function(download_if_needed url out_path)
-    if (EXISTS "${out_path}")
-        message(STATUS "Using cached file: ${out_path}")
-        return()
-    endif ()
-
-    get_filename_component(out_dir "${out_path}" DIRECTORY)
-    file(MAKE_DIRECTORY "${out_dir}")
-
-    message(STATUS "Downloading ${url}")
+set(HYFLUID_JSON_HEADER "${HYFLUID_VENDOR_DIR}/json/json.hpp")
+if (EXISTS "${HYFLUID_JSON_HEADER}")
+    message(STATUS "Using cached file: ${HYFLUID_JSON_HEADER}")
+else ()
+    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/json")
+    message(STATUS "Downloading https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp")
     file(DOWNLOAD
-            "${url}"
-            "${out_path}"
+            "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
+            "${HYFLUID_JSON_HEADER}"
             TLS_VERIFY ON
-            STATUS dl_status
+            STATUS HYFLUID_DOWNLOAD_STATUS
     )
-
-    list(GET dl_status 0 dl_code)
-    list(GET dl_status 1 dl_msg)
-    if (NOT dl_code EQUAL 0)
-        message(FATAL_ERROR "Failed to download ${url}: [${dl_code}] ${dl_msg}")
+    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
     endif ()
-endfunction()
+endif ()
 
-download_if_needed(
-        "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
-        "${CMAKE_CURRENT_BINARY_DIR}/vendor/json/json.hpp"
+set(HYFLUID_STB_IMAGE_HEADER "${HYFLUID_VENDOR_DIR}/stb/stb_image.h")
+if (EXISTS "${HYFLUID_STB_IMAGE_HEADER}")
+    message(STATUS "Using cached file: ${HYFLUID_STB_IMAGE_HEADER}")
+else ()
+    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/stb")
+    message(STATUS "Downloading https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h")
+    file(DOWNLOAD
+            "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
+            "${HYFLUID_STB_IMAGE_HEADER}"
+            TLS_VERIFY ON
+            STATUS HYFLUID_DOWNLOAD_STATUS
 )
-download_if_needed(
-        "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
-        "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image.h"
+    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+    endif ()
+endif ()
+
+set(HYFLUID_STB_IMAGE_WRITE_HEADER "${HYFLUID_VENDOR_DIR}/stb/stb_image_write.h")
+if (EXISTS "${HYFLUID_STB_IMAGE_WRITE_HEADER}")
+    message(STATUS "Using cached file: ${HYFLUID_STB_IMAGE_WRITE_HEADER}")
+else ()
+    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/stb")
+    message(STATUS "Downloading https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h")
+    file(DOWNLOAD
+            "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
+            "${HYFLUID_STB_IMAGE_WRITE_HEADER}"
+            TLS_VERIFY ON
+            STATUS HYFLUID_DOWNLOAD_STATUS
 )
-download_if_needed(
-        "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
-        "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image_write.h"
-)
+    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+    endif ()
+endif ()
 
 # ============================================================================
 # Libraries
@@ -116,7 +198,7 @@ target_sources(
         ngp.dataset.ixx
         ngp.train.ixx
 )
-target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
+target_include_directories(hyfluid PRIVATE "${HYFLUID_VENDOR_DIR}" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
 target_link_libraries(hyfluid PRIVATE CUDA::cudart ${HYFLUID_FFMPEG_LIBRARIES})
 set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 
