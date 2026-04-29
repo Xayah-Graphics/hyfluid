@@ -41,9 +41,9 @@ namespace hyfluid::train {
             }
             if (train_byte_count > std::numeric_limits<std::size_t>::max()) throw std::runtime_error{"training videos are too large for this host."};
             train_pixels.reserve(static_cast<std::size_t>(train_byte_count));
-            train_cameras.reserve(static_cast<std::size_t>(this->host.train_view_count) * 17uz);
+            train_cameras.reserve(static_cast<std::size_t>(this->host.train_view_count) * 17);
             for (const hyfluid::dataset::ScalarRealVideo& video : dataset.train) {
-                if (video.rgb.size() != static_cast<std::size_t>(video.frame_count) * video.width * video.height * 3uz) throw std::runtime_error{std::format("{} has invalid RGB byte count.", video.file_name)};
+                if (video.rgb.size() != static_cast<std::size_t>(video.frame_count) * video.width * video.height * 3) throw std::runtime_error{std::format("{} has invalid RGB byte count.", video.file_name)};
                 train_pixels.append_range(video.rgb);
                 train_cameras.append_range(video.camera);
                 train_cameras.push_back(video.focal);
@@ -58,9 +58,9 @@ namespace hyfluid::train {
             }
             if (test_byte_count > std::numeric_limits<std::size_t>::max()) throw std::runtime_error{"test videos are too large for this host."};
             test_pixels.reserve(static_cast<std::size_t>(test_byte_count));
-            test_cameras.reserve(static_cast<std::size_t>(this->host.test_view_count) * 17uz);
+            test_cameras.reserve(static_cast<std::size_t>(this->host.test_view_count) * 17);
             for (const hyfluid::dataset::ScalarRealVideo& video : dataset.test) {
-                if (video.rgb.size() != static_cast<std::size_t>(video.frame_count) * video.width * video.height * 3uz) throw std::runtime_error{std::format("{} has invalid RGB byte count.", video.file_name)};
+                if (video.rgb.size() != static_cast<std::size_t>(video.frame_count) * video.width * video.height * 3) throw std::runtime_error{std::format("{} has invalid RGB byte count.", video.file_name)};
                 test_pixels.append_range(video.rgb);
                 test_cameras.append_range(video.camera);
                 test_cameras.push_back(video.focal);
@@ -105,12 +105,12 @@ namespace hyfluid::train {
             hyfluid::cuda::allocate_float_buffer(this->host.param_count, this->device.first_moments);
             hyfluid::cuda::allocate_float_buffer(this->host.param_count, this->device.second_moments);
             hyfluid::cuda::allocate_float_buffer(this->host.options.rays_per_step, this->device.loss_values);
-            hyfluid::cuda::allocate_double_buffer(1uz, this->device.test_loss_sum);
-            hyfluid::cuda::allocate_byte_buffer(static_cast<std::size_t>(this->host.width) * this->host.height * 2uz * 3uz, this->device.comparison_pixels);
-            hyfluid::cuda::allocate_byte_buffer(static_cast<std::size_t>(hyfluid::cuda::TIME_OCCUPANCY_BINS) * hyfluid::cuda::OCCUPANCY_GRID_CELLS / 8uz, this->device.occupancy_bits);
+            hyfluid::cuda::allocate_double_buffer(1, this->device.test_loss_sum);
+            hyfluid::cuda::allocate_byte_buffer(static_cast<std::size_t>(this->host.width) * this->host.height * 2 * 3, this->device.comparison_pixels);
+            hyfluid::cuda::allocate_byte_buffer(static_cast<std::size_t>(hyfluid::cuda::TIME_OCCUPANCY_BINS) * hyfluid::cuda::OCCUPANCY_GRID_CELLS / 8, this->device.occupancy_bits);
             hyfluid::cuda::allocate_float_buffer(static_cast<std::size_t>(hyfluid::cuda::TIME_OCCUPANCY_BINS) * hyfluid::cuda::OCCUPANCY_GRID_CELLS, this->device.occupancy_values);
             hyfluid::cuda::allocate_uint32_buffer(hyfluid::cuda::TIME_OCCUPANCY_BINS, this->device.occupancy_counts);
-            hyfluid::cuda::allocate_uint32_buffer(1uz, this->device.occupancy_skipped_samples);
+            hyfluid::cuda::allocate_uint32_buffer(1, this->device.occupancy_skipped_samples);
             hyfluid::cuda::initialize_parameters(this->host.param_count, this->host.hash_param_count, this->host.w1_offset, this->host.w2_offset, this->host.color_offset, this->device.params, this->device.gradients, this->device.first_moments, this->device.second_moments);
             hyfluid::cuda::initialize_occupancy(this->device.occupancy_bits, this->device.occupancy_values, this->device.occupancy_counts);
         } catch (...) {
@@ -194,7 +194,7 @@ namespace hyfluid::train {
             std::filesystem::create_directories(this->host.options.test_output_dir);
             const auto start_time              = std::chrono::steady_clock::now();
             const std::uint32_t frames_to_test = std::min(this->host.options.test_frame_limit, this->host.frame_count);
-            std::vector<std::uint8_t> comparison_pixels(static_cast<std::size_t>(this->host.width) * this->host.height * 2uz * 3uz);
+            std::vector<std::uint8_t> comparison_pixels(static_cast<std::size_t>(this->host.width) * this->host.height * 2 * 3);
             double total_loss_sum     = 0.0;
             std::uint32_t image_count = 0u;
 
@@ -253,7 +253,7 @@ namespace hyfluid::train {
             header["params"] = {
                 {"dtype", "F32"},
                 {"shape", nlohmann::json::array({this->host.param_count})},
-                {"data_offsets", nlohmann::json::array({0uz, static_cast<std::uint64_t>(this->host.param_count) * sizeof(float)})},
+                {"data_offsets", nlohmann::json::array({0, static_cast<std::uint64_t>(this->host.param_count) * sizeof(float)})},
             };
             const std::string header_text   = header.dump();
             const std::uint64_t header_size = header_text.size();

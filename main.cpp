@@ -62,12 +62,12 @@ int main(const int argc, const char* const* const argv) {
     CliOptions cli = {};
     std::optional<std::string> error;
 
-    for (std::size_t i = 1uz; i < arguments.size() && !error.has_value(); ++i) {
+    for (std::size_t i = 1; i < arguments.size() && !error.has_value(); ++i) {
         const std::string_view argument{arguments[i]};
         const std::size_t assignment  = argument.find('=');
-        const std::string_view option = assignment == std::string_view::npos ? argument : argument.substr(0uz, assignment);
+        const std::string_view option = assignment == std::string_view::npos ? argument : argument.substr(0, assignment);
         std::optional<std::string_view> inline_value;
-        if (assignment != std::string_view::npos) inline_value = argument.substr(assignment + 1uz);
+        if (assignment != std::string_view::npos) inline_value = argument.substr(assignment + 1);
 
         if (option == "-h" || option == "--help") {
             if (inline_value.has_value())
@@ -80,7 +80,7 @@ int main(const int argc, const char* const* const argv) {
             std::string_view value;
             if (inline_value.has_value())
                 value = *inline_value;
-            else if (i + 1uz < arguments.size())
+            else if (i + 1 < arguments.size())
                 value = arguments[++i];
             else {
                 error = std::format("{} requires a value.", option);
@@ -98,7 +98,7 @@ int main(const int argc, const char* const* const argv) {
             std::string_view value;
             if (inline_value.has_value())
                 value = *inline_value;
-            else if (i + 1uz < arguments.size())
+            else if (i + 1 < arguments.size())
                 value = arguments[++i];
             else {
                 error = std::format("{} requires a value.", option);
@@ -119,7 +119,7 @@ int main(const int argc, const char* const* const argv) {
             std::string_view value;
             if (inline_value.has_value())
                 value = *inline_value;
-            else if (i + 1uz < arguments.size())
+            else if (i + 1 < arguments.size())
                 value = arguments[++i];
             else {
                 error = std::format("{} requires a value.", option);

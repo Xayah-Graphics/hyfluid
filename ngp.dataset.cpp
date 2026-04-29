@@ -21,39 +21,39 @@ namespace hyfluid::dataset {
             dataset.far                          = json.at("far").get<float>();
             dataset.phi                          = json.at("phi").get<float>();
             const std::string rotation_axis_text = json.at("rot").get<std::string>();
-            if (rotation_axis_text.size() != 1uz || (rotation_axis_text[0] != 'Y' && rotation_axis_text[0] != 'Z')) throw std::runtime_error{"ScalarReal info.json rot must be Y or Z."};
+            if (rotation_axis_text.size() != 1 || (rotation_axis_text[0] != 'Y' && rotation_axis_text[0] != 'Z')) throw std::runtime_error{"ScalarReal info.json rot must be Y or Z."};
             dataset.rotation_axis = rotation_axis_text[0];
             if (!std::isfinite(dataset.near) || !std::isfinite(dataset.far) || dataset.near <= 0.0f || dataset.far <= dataset.near) throw std::runtime_error{"ScalarReal info.json declares invalid near/far."};
 
             const nlohmann::json& render_center_json = json.at("render_center");
-            for (std::size_t i = 0uz; i < 3uz; ++i) dataset.render_center[i] = render_center_json.at(i).get<float>();
+            for (std::size_t i = 0; i < 3; ++i) dataset.render_center[i] = render_center_json.at(i).get<float>();
 
             const nlohmann::json& voxel_scale_json = json.at("voxel_scale");
-            for (std::size_t i = 0uz; i < 3uz; ++i) {
+            for (std::size_t i = 0; i < 3; ++i) {
                 dataset.voxel_scale[i] = voxel_scale_json.at(i).get<float>();
                 if (!std::isfinite(dataset.voxel_scale[i]) || dataset.voxel_scale[i] == 0.0f) throw std::runtime_error{"ScalarReal info.json declares invalid voxel_scale."};
             }
 
             std::array<float, 16> voxel_matrix = {};
             const nlohmann::json& voxel_json   = json.at("voxel_matrix");
-            for (std::size_t row = 0uz; row < 4uz; ++row) {
-                voxel_matrix[row * 4uz + 0uz] = voxel_json.at(row).at(2uz).get<float>();
-                voxel_matrix[row * 4uz + 1uz] = voxel_json.at(row).at(1uz).get<float>();
-                voxel_matrix[row * 4uz + 2uz] = voxel_json.at(row).at(0uz).get<float>();
-                voxel_matrix[row * 4uz + 3uz] = voxel_json.at(row).at(3uz).get<float>();
+            for (std::size_t row = 0; row < 4; ++row) {
+                voxel_matrix[row * 4 + 0] = voxel_json.at(row).at(2).get<float>();
+                voxel_matrix[row * 4 + 1] = voxel_json.at(row).at(1).get<float>();
+                voxel_matrix[row * 4 + 2] = voxel_json.at(row).at(0).get<float>();
+                voxel_matrix[row * 4 + 3] = voxel_json.at(row).at(3).get<float>();
             }
             dataset.sim_to_world = voxel_matrix;
 
             std::array<float, 32> inverse_work = {};
-            for (std::size_t row = 0uz; row < 4uz; ++row) {
-                for (std::size_t column = 0uz; column < 4uz; ++column) inverse_work[row * 8uz + column] = voxel_matrix[row * 4uz + column];
-                inverse_work[row * 8uz + 4uz + row] = 1.0f;
+            for (std::size_t row = 0; row < 4; ++row) {
+                for (std::size_t column = 0; column < 4; ++column) inverse_work[row * 8 + column] = voxel_matrix[row * 4 + column];
+                inverse_work[row * 8 + 4 + row] = 1.0f;
             }
-            for (std::size_t pivot_column = 0uz; pivot_column < 4uz; ++pivot_column) {
+            for (std::size_t pivot_column = 0; pivot_column < 4; ++pivot_column) {
                 std::size_t pivot_row = pivot_column;
-                float pivot_abs       = std::fabs(inverse_work[pivot_row * 8uz + pivot_column]);
-                for (std::size_t row = pivot_column + 1uz; row < 4uz; ++row) {
-                    const float candidate_abs = std::fabs(inverse_work[row * 8uz + pivot_column]);
+                float pivot_abs       = std::fabs(inverse_work[pivot_row * 8 + pivot_column]);
+                for (std::size_t row = pivot_column + 1; row < 4; ++row) {
+                    const float candidate_abs = std::fabs(inverse_work[row * 8 + pivot_column]);
                     if (candidate_abs > pivot_abs) {
                         pivot_abs = candidate_abs;
                         pivot_row = row;
@@ -61,25 +61,25 @@ namespace hyfluid::dataset {
                 }
                 if (pivot_abs <= 1e-12f) throw std::runtime_error{"ScalarReal voxel_matrix is singular."};
                 if (pivot_row != pivot_column) {
-                    for (std::size_t column = 0uz; column < 8uz; ++column) std::swap(inverse_work[pivot_row * 8uz + column], inverse_work[pivot_column * 8uz + column]);
+                    for (std::size_t column = 0; column < 8; ++column) std::swap(inverse_work[pivot_row * 8 + column], inverse_work[pivot_column * 8 + column]);
                 }
-                const float pivot = inverse_work[pivot_column * 8uz + pivot_column];
-                for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[pivot_column * 8uz + column] /= pivot;
-                for (std::size_t row = 0uz; row < 4uz; ++row) {
+                const float pivot = inverse_work[pivot_column * 8 + pivot_column];
+                for (std::size_t column = 0; column < 8; ++column) inverse_work[pivot_column * 8 + column] /= pivot;
+                for (std::size_t row = 0; row < 4; ++row) {
                     if (row == pivot_column) continue;
-                    const float factor = inverse_work[row * 8uz + pivot_column];
-                    for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[row * 8uz + column] -= factor * inverse_work[pivot_column * 8uz + column];
+                    const float factor = inverse_work[row * 8 + pivot_column];
+                    for (std::size_t column = 0; column < 8; ++column) inverse_work[row * 8 + column] -= factor * inverse_work[pivot_column * 8 + column];
                 }
             }
-            for (std::size_t row = 0uz; row < 4uz; ++row)
-                for (std::size_t column = 0uz; column < 4uz; ++column) dataset.world_to_sim[row * 4uz + column] = inverse_work[row * 8uz + 4uz + column];
+            for (std::size_t row = 0; row < 4; ++row)
+                for (std::size_t column = 0; column < 4; ++column) dataset.world_to_sim[row * 4 + column] = inverse_work[row * 8 + 4 + column];
 
             const std::array<std::string_view, 2> split_names = {"train_videos", "test_videos"};
-            for (const std::size_t split_index : std::views::iota(0uz, split_names.size())) {
+            for (const std::size_t split_index : std::views::iota(std::size_t{0}, split_names.size())) {
                 const nlohmann::json& videos_json = json.at(split_names[split_index]);
                 if (!videos_json.is_array() || videos_json.empty()) throw std::runtime_error{std::format("ScalarReal info.json must contain a non-empty {} array.", split_names[split_index])};
 
-                std::vector<ScalarRealVideo>& destination = split_index == 0uz ? dataset.train : dataset.test;
+                std::vector<ScalarRealVideo>& destination = split_index == 0 ? dataset.train : dataset.test;
                 destination.reserve(videos_json.size());
 
                 for (const nlohmann::json& video_json : videos_json) {
@@ -95,8 +95,8 @@ namespace hyfluid::dataset {
                     if (video_json.contains("transform_matrix_list")) throw std::runtime_error{std::format("{} uses transform_matrix_list; this HyFluid density implementation expects one static transform_matrix per video.", video.file_name)};
 
                     const nlohmann::json& camera_json = video_json.at("transform_matrix");
-                    for (std::size_t row = 0uz; row < 4uz; ++row)
-                        for (std::size_t column = 0uz; column < 4uz; ++column) video.camera[row * 4uz + column] = camera_json.at(row).at(column).get<float>();
+                    for (std::size_t row = 0; row < 4; ++row)
+                        for (std::size_t column = 0; column < 4; ++column) video.camera[row * 4 + column] = camera_json.at(row).at(column).get<float>();
 
                     AVFormatContext* format_context        = nullptr;
                     const std::filesystem::path video_path = path / video.file_name;
@@ -165,7 +165,7 @@ namespace hyfluid::dataset {
                                     for (std::uint32_t row = 0u; row < video.height; ++row) {
                                         const std::uint8_t* row_begin = rgb_frame->data[0] + static_cast<std::ptrdiff_t>(row) * rgb_frame->linesize[0];
                                         std::uint8_t* row_out         = video.rgb.data() + (static_cast<std::uint64_t>(decoded_frame_index) * video.height + row) * static_cast<std::uint64_t>(video.width) * 3ull;
-                                        std::memcpy(row_out, row_begin, static_cast<std::size_t>(video.width) * 3uz);
+                                        std::memcpy(row_out, row_begin, static_cast<std::size_t>(video.width) * 3);
                                     }
                                     ++decoded_frame_index;
                                 }
@@ -183,7 +183,7 @@ namespace hyfluid::dataset {
                             for (std::uint32_t row = 0u; row < video.height; ++row) {
                                 const std::uint8_t* row_begin = rgb_frame->data[0] + static_cast<std::ptrdiff_t>(row) * rgb_frame->linesize[0];
                                 std::uint8_t* row_out         = video.rgb.data() + (static_cast<std::uint64_t>(decoded_frame_index) * video.height + row) * static_cast<std::uint64_t>(video.width) * 3ull;
-                                std::memcpy(row_out, row_begin, static_cast<std::size_t>(video.width) * 3uz);
+                                std::memcpy(row_out, row_begin, static_cast<std::size_t>(video.width) * 3);
                             }
                             ++decoded_frame_index;
                         }

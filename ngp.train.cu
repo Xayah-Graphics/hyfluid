@@ -9,7 +9,7 @@
 
 namespace hyfluid::cuda {
     void free_device_buffers(void** const pointers, const std::size_t count) noexcept {
-        for (std::size_t i = 0uz; i < count; ++i) {
+        for (std::size_t i = 0; i < count; ++i) {
             if (pointers[i] != nullptr) cudaFree(pointers[i]);
             pointers[i] = nullptr;
         }
@@ -442,7 +442,7 @@ namespace hyfluid::cuda {
     } // namespace
 
     void upload_bytes(const std::uint8_t* const data, const std::size_t byte_count, const std::uint8_t*& out_data) {
-        if (data == nullptr || byte_count == 0uz) throw std::runtime_error{"invalid byte upload input."};
+        if (data == nullptr || byte_count == 0) throw std::runtime_error{"invalid byte upload input."};
         void* ptr = nullptr;
         if (const cudaError_t status = cudaMalloc(&ptr, byte_count); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc bytes failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemcpy(ptr, data, byte_count, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy bytes failed: "} + cudaGetErrorString(status)};
@@ -450,7 +450,7 @@ namespace hyfluid::cuda {
     }
 
     void upload_floats(const float* const data, const std::size_t value_count, const float*& out_data) {
-        if (data == nullptr || value_count == 0uz) throw std::runtime_error{"invalid float upload input."};
+        if (data == nullptr || value_count == 0) throw std::runtime_error{"invalid float upload input."};
         void* ptr = nullptr;
         if (const cudaError_t status = cudaMalloc(&ptr, value_count * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc floats failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemcpy(ptr, data, value_count * sizeof(float), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy floats failed: "} + cudaGetErrorString(status)};
@@ -458,7 +458,7 @@ namespace hyfluid::cuda {
     }
 
     void upload_uint32s(const std::uint32_t* const data, const std::size_t value_count, const std::uint32_t*& out_data) {
-        if (data == nullptr || value_count == 0uz) throw std::runtime_error{"invalid uint32 upload input."};
+        if (data == nullptr || value_count == 0) throw std::runtime_error{"invalid uint32 upload input."};
         void* ptr = nullptr;
         if (const cudaError_t status = cudaMalloc(&ptr, value_count * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc uint32s failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemcpy(ptr, data, value_count * sizeof(std::uint32_t), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy uint32s failed: "} + cudaGetErrorString(status)};
@@ -466,22 +466,22 @@ namespace hyfluid::cuda {
     }
 
     void allocate_float_buffer(const std::size_t value_count, float*& out_data) {
-        if (value_count == 0uz) throw std::runtime_error{"float allocation size must be non-zero."};
+        if (value_count == 0) throw std::runtime_error{"float allocation size must be non-zero."};
         if (const cudaError_t status = cudaMalloc(&out_data, value_count * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc float buffer failed: "} + cudaGetErrorString(status)};
     }
 
     void allocate_double_buffer(const std::size_t value_count, double*& out_data) {
-        if (value_count == 0uz) throw std::runtime_error{"double allocation size must be non-zero."};
+        if (value_count == 0) throw std::runtime_error{"double allocation size must be non-zero."};
         if (const cudaError_t status = cudaMalloc(&out_data, value_count * sizeof(double)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc double buffer failed: "} + cudaGetErrorString(status)};
     }
 
     void allocate_byte_buffer(const std::size_t byte_count, std::uint8_t*& out_data) {
-        if (byte_count == 0uz) throw std::runtime_error{"byte allocation size must be non-zero."};
+        if (byte_count == 0) throw std::runtime_error{"byte allocation size must be non-zero."};
         if (const cudaError_t status = cudaMalloc(&out_data, byte_count); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc byte buffer failed: "} + cudaGetErrorString(status)};
     }
 
     void allocate_uint32_buffer(const std::size_t value_count, std::uint32_t*& out_data) {
-        if (value_count == 0uz) throw std::runtime_error{"uint32 allocation size must be non-zero."};
+        if (value_count == 0) throw std::runtime_error{"uint32 allocation size must be non-zero."};
         if (const cudaError_t status = cudaMalloc(&out_data, value_count * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc uint32 buffer failed: "} + cudaGetErrorString(status)};
     }
 
@@ -494,7 +494,7 @@ namespace hyfluid::cuda {
 
     void initialize_occupancy(std::uint8_t* const occupancy_bits, float* const occupancy_values, std::uint32_t* const occupancy_counts) {
         if (occupancy_bits == nullptr || occupancy_values == nullptr || occupancy_counts == nullptr) throw std::runtime_error{"invalid occupancy initialization input."};
-        if (const cudaError_t status = cudaMemset(occupancy_bits, 0xFF, static_cast<std::size_t>(TIME_OCCUPANCY_BINS) * OCCUPANCY_GRID_CELLS / 8uz); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset occupancy bits failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(occupancy_bits, 0xFF, static_cast<std::size_t>(TIME_OCCUPANCY_BINS) * OCCUPANCY_GRID_CELLS / 8); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset occupancy bits failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(occupancy_values, 0, static_cast<std::size_t>(TIME_OCCUPANCY_BINS) * OCCUPANCY_GRID_CELLS * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset occupancy values failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(occupancy_counts, 0, static_cast<std::size_t>(TIME_OCCUPANCY_BINS) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset occupancy counts failed: "} + cudaGetErrorString(status)};
     }
@@ -534,7 +534,7 @@ namespace hyfluid::cuda {
     }
 
     void download_floats(const float* const data, const std::size_t value_count, float* const out_data) {
-        if (data == nullptr || out_data == nullptr || value_count == 0uz) throw std::runtime_error{"invalid float download input."};
+        if (data == nullptr || out_data == nullptr || value_count == 0) throw std::runtime_error{"invalid float download input."};
         if (const cudaError_t status = cudaMemcpy(out_data, data, value_count * sizeof(float), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy float download failed: "} + cudaGetErrorString(status)};
     }
 
@@ -557,7 +557,7 @@ namespace hyfluid::cuda {
     }
 
     void download_bytes(const std::uint8_t* const data, const std::size_t byte_count, std::uint8_t* const out_data) {
-        if (data == nullptr || out_data == nullptr || byte_count == 0uz) throw std::runtime_error{"invalid byte download input."};
+        if (data == nullptr || out_data == nullptr || byte_count == 0) throw std::runtime_error{"invalid byte download input."};
         if (const cudaError_t status = cudaMemcpy(out_data, data, byte_count, cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy byte download failed: "} + cudaGetErrorString(status)};
     }
 } // namespace hyfluid::cuda
