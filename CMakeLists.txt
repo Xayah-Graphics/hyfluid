@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(HyFluid VERSION 1.0.0 LANGUAGES CXX CUDA)
 
+option(HYFLUID_BUILD_BENCHMARKS "Build optional HyFluid benchmark executables" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -36,190 +37,252 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
-set(HYFLUID_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-set(HYFLUID_FFMPEG_RELEASE_TAG "autobuild-2026-04-28-15-54")
-if (WIN32)
-    set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-10-g7f5c90f77e-win64-lgpl-shared-8.1")
-    set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "zip")
-    set(HYFLUID_FFMPEG_SHA256 "f700bcb11b1b5fcc1c49a8b16d56d2aa4ec42099b4e1feb657b4dcf1a7f02ee3")
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HYFLUID_SYSTEM_PROCESSOR)
-    if (HYFLUID_SYSTEM_PROCESSOR STREQUAL "x86_64" OR HYFLUID_SYSTEM_PROCESSOR STREQUAL "amd64")
-        set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1-10-g7f5c90f77e-linux64-lgpl-shared-8.1")
-        set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "tar.xz")
-        set(HYFLUID_FFMPEG_SHA256 "4ba68d323e8d767a285ce49f417f08ea0567ab6761b27962c20f818d8ace7acc")
-    else ()
-        message(FATAL_ERROR "Unsupported Linux processor for vendor FFmpeg: ${CMAKE_SYSTEM_PROCESSOR}")
-    endif ()
-else ()
-    message(FATAL_ERROR "Unsupported platform for vendor FFmpeg: ${CMAKE_SYSTEM_NAME}")
-endif ()
-set(HYFLUID_FFMPEG_ARCHIVE_NAME "${HYFLUID_FFMPEG_NAME}.${HYFLUID_FFMPEG_ARCHIVE_EXTENSION}")
-set(HYFLUID_FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/${HYFLUID_FFMPEG_RELEASE_TAG}/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
-set(HYFLUID_FFMPEG_VENDOR_DIR "${HYFLUID_VENDOR_DIR}/ffmpeg")
-set(HYFLUID_FFMPEG_ARCHIVE "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
-set(HYFLUID_FFMPEG_EXTRACT_DIR "${HYFLUID_FFMPEG_VENDOR_DIR}/extract")
-set(HYFLUID_FFMPEG_MARKER "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}.sha256")
-set(HYFLUID_FFMPEG_ROOT "${HYFLUID_FFMPEG_EXTRACT_DIR}/${HYFLUID_FFMPEG_NAME}")
-set(HYFLUID_FFMPEG_INCLUDE_DIR "${HYFLUID_FFMPEG_ROOT}/include")
-set(HYFLUID_FFMPEG_LIB_DIR "${HYFLUID_FFMPEG_ROOT}/lib")
-set(HYFLUID_FFMPEG_BIN_DIR "${HYFLUID_FFMPEG_ROOT}/bin")
-if (WIN32)
-    set(HYFLUID_FFMPEG_LIBRARIES
-            "${HYFLUID_FFMPEG_LIB_DIR}/avformat.lib"
-            "${HYFLUID_FFMPEG_LIB_DIR}/avcodec.lib"
-            "${HYFLUID_FFMPEG_LIB_DIR}/swscale.lib"
-            "${HYFLUID_FFMPEG_LIB_DIR}/swresample.lib"
-            "${HYFLUID_FFMPEG_LIB_DIR}/avutil.lib"
-    )
-    set(HYFLUID_FFMPEG_RUNTIME_FILES
-            "${HYFLUID_FFMPEG_BIN_DIR}/avformat-62.dll"
-            "${HYFLUID_FFMPEG_BIN_DIR}/avcodec-62.dll"
-            "${HYFLUID_FFMPEG_BIN_DIR}/swscale-9.dll"
-            "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
-            "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
-    )
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(HYFLUID_FFMPEG_LIBRARIES
-            "${HYFLUID_FFMPEG_LIB_DIR}/libavformat.so"
-            "${HYFLUID_FFMPEG_LIB_DIR}/libavcodec.so"
-            "${HYFLUID_FFMPEG_LIB_DIR}/libswscale.so"
-            "${HYFLUID_FFMPEG_LIB_DIR}/libswresample.so"
-            "${HYFLUID_FFMPEG_LIB_DIR}/libavutil.so"
-    )
-endif ()
-
-string(LENGTH "${HYFLUID_FFMPEG_SHA256}" HYFLUID_FFMPEG_SHA256_LENGTH)
-if (NOT HYFLUID_FFMPEG_SHA256_LENGTH EQUAL 64)
-    message(FATAL_ERROR "Invalid configured SHA256 for ${HYFLUID_FFMPEG_ARCHIVE_NAME}")
-endif ()
-
-file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_VENDOR_DIR}")
-message(STATUS "Downloading ${HYFLUID_FFMPEG_URL}")
-file(DOWNLOAD
-        "${HYFLUID_FFMPEG_URL}"
-        "${HYFLUID_FFMPEG_ARCHIVE}"
-        EXPECTED_HASH "SHA256=${HYFLUID_FFMPEG_SHA256}"
-        TLS_VERIFY ON
-        STATUS HYFLUID_DOWNLOAD_STATUS
+set(HYFLUID_TRAIN_PROFILE "baseline" CACHE STRING "Compile-time HyFluid train profile")
+set(HYFLUID_TRAIN_PROFILE_CHOICES
+        baseline
 )
-list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
-list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
-if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
-    message(FATAL_ERROR "Failed to download ${HYFLUID_FFMPEG_URL}: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+set(HYFLUID_BENCHMARK_PROFILES "baseline" CACHE STRING "Semicolon-separated HyFluid benchmark profiles to build")
+set_property(CACHE HYFLUID_TRAIN_PROFILE PROPERTY STRINGS ${HYFLUID_TRAIN_PROFILE_CHOICES})
+if (NOT HYFLUID_TRAIN_PROFILE IN_LIST HYFLUID_TRAIN_PROFILE_CHOICES)
+    message(FATAL_ERROR "Unknown HYFLUID_TRAIN_PROFILE='${HYFLUID_TRAIN_PROFILE}'. Supported profiles: ${HYFLUID_TRAIN_PROFILE_CHOICES}")
 endif ()
+string(MAKE_C_IDENTIFIER "${HYFLUID_TRAIN_PROFILE}" HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX)
+string(TOUPPER "${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}" HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX)
 
-set(HYFLUID_FFMPEG_EXISTING_SHA256 "")
-if (EXISTS "${HYFLUID_FFMPEG_MARKER}")
-    file(READ "${HYFLUID_FFMPEG_MARKER}" HYFLUID_FFMPEG_EXISTING_SHA256)
-    string(STRIP "${HYFLUID_FFMPEG_EXISTING_SHA256}" HYFLUID_FFMPEG_EXISTING_SHA256)
-endif ()
-if (NOT HYFLUID_FFMPEG_EXISTING_SHA256 STREQUAL HYFLUID_FFMPEG_SHA256)
-    message(STATUS "Extracting ${HYFLUID_FFMPEG_ARCHIVE}")
-    file(REMOVE_RECURSE "${HYFLUID_FFMPEG_EXTRACT_DIR}")
-    file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_EXTRACT_DIR}")
-    file(ARCHIVE_EXTRACT INPUT "${HYFLUID_FFMPEG_ARCHIVE}" DESTINATION "${HYFLUID_FFMPEG_EXTRACT_DIR}")
-    file(WRITE "${HYFLUID_FFMPEG_MARKER}" "${HYFLUID_FFMPEG_SHA256}\n")
-endif ()
-
-if (NOT IS_DIRECTORY "${HYFLUID_FFMPEG_INCLUDE_DIR}")
-    message(FATAL_ERROR "Vendor FFmpeg include directory is missing: ${HYFLUID_FFMPEG_INCLUDE_DIR}")
-endif ()
-foreach (HYFLUID_FFMPEG_FILE IN LISTS HYFLUID_FFMPEG_LIBRARIES HYFLUID_FFMPEG_RUNTIME_FILES)
-    if (NOT EXISTS "${HYFLUID_FFMPEG_FILE}")
-        message(FATAL_ERROR "Vendor FFmpeg file is missing: ${HYFLUID_FFMPEG_FILE}")
+function(download_if_needed url out_path)
+    if (EXISTS "${out_path}")
+        message(STATUS "Using cached file: ${out_path}")
+        return()
     endif ()
-endforeach ()
 
-set(HYFLUID_JSON_HEADER "${HYFLUID_VENDOR_DIR}/json/json.hpp")
-if (EXISTS "${HYFLUID_JSON_HEADER}")
-    message(STATUS "Using cached file: ${HYFLUID_JSON_HEADER}")
-else ()
-    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/json")
-    message(STATUS "Downloading https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp")
+    get_filename_component(out_dir "${out_path}" DIRECTORY)
+    file(MAKE_DIRECTORY "${out_dir}")
+
+    message(STATUS "Downloading ${url}")
     file(DOWNLOAD
-            "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
-            "${HYFLUID_JSON_HEADER}"
+            "${url}"
+            "${out_path}"
             TLS_VERIFY ON
-            STATUS HYFLUID_DOWNLOAD_STATUS
+            STATUS dl_status
     )
-    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
-    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
-    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
-    endif ()
-endif ()
 
-set(HYFLUID_STB_IMAGE_HEADER "${HYFLUID_VENDOR_DIR}/stb/stb_image.h")
-if (EXISTS "${HYFLUID_STB_IMAGE_HEADER}")
-    message(STATUS "Using cached file: ${HYFLUID_STB_IMAGE_HEADER}")
-else ()
-    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/stb")
-    message(STATUS "Downloading https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h")
-    file(DOWNLOAD
-            "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
-            "${HYFLUID_STB_IMAGE_HEADER}"
-            TLS_VERIFY ON
-            STATUS HYFLUID_DOWNLOAD_STATUS
-    )
-    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
-    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
-    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+    list(GET dl_status 0 dl_code)
+    list(GET dl_status 1 dl_msg)
+    if (NOT dl_code EQUAL 0)
+        message(FATAL_ERROR "Failed to download ${url}: [${dl_code}] ${dl_msg}")
     endif ()
-endif ()
+endfunction()
 
-set(HYFLUID_STB_IMAGE_WRITE_HEADER "${HYFLUID_VENDOR_DIR}/stb/stb_image_write.h")
-if (EXISTS "${HYFLUID_STB_IMAGE_WRITE_HEADER}")
-    message(STATUS "Using cached file: ${HYFLUID_STB_IMAGE_WRITE_HEADER}")
-else ()
-    file(MAKE_DIRECTORY "${HYFLUID_VENDOR_DIR}/stb")
-    message(STATUS "Downloading https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h")
-    file(DOWNLOAD
-            "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
-            "${HYFLUID_STB_IMAGE_WRITE_HEADER}"
-            TLS_VERIFY ON
-            STATUS HYFLUID_DOWNLOAD_STATUS
-    )
-    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
-    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
-    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
-    endif ()
-endif ()
+download_if_needed(
+        "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/vendor/json/json.hpp"
+)
+download_if_needed(
+        "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image_write.h"
+)
 
 # ============================================================================
-# Libraries
+# Core Library
 # ============================================================================
-add_library(hyfluid)
+add_library(hyfluid-train)
 target_sources(
-        hyfluid
+        hyfluid-train
         PRIVATE
-        ngp.dataset.cpp
-        ngp.train.cpp
-        ngp.train.cu
-        ngp.train.h
+        hyfluid.train.cpp
+        hyfluid.train.cu
+        hyfluid.train.config.h
+        hyfluid.train.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        ngp.dataset.ixx
-        ngp.train.ixx
+        hyfluid.train.ixx
 )
-target_include_directories(hyfluid PRIVATE "${HYFLUID_VENDOR_DIR}" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
-target_link_libraries(hyfluid PRIVATE CUDA::cudart CUDA::cublas CUDA::cublasLt ${HYFLUID_FFMPEG_LIBRARIES})
-set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
+target_include_directories(hyfluid-train PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+target_compile_definitions(hyfluid-train PRIVATE "HYFLUID_TRAIN_PROFILE_${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}=1")
+target_link_libraries(hyfluid-train PRIVATE CUDA::cublas CUDA::cublasLt)
+set_property(TARGET hyfluid-train PROPERTY CXX_MODULE_STD ON)
 
 
 # ============================================================================
-# Executable
+# Optional Benchmarks
 # ============================================================================
-add_executable(hyfluid-app main.cpp)
-target_link_libraries(hyfluid-app PRIVATE hyfluid)
-if (WIN32)
-    add_custom_command(
-            TARGET hyfluid-app POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-app>"
+if (HYFLUID_BUILD_BENCHMARKS)
+    set(HYFLUID_DATASET_GIT_TAG "bc636fbfc7507e8173156393f71c0b569f5fe95b")
+    set(HYFLUID_DATASET_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/dataset/${HYFLUID_DATASET_GIT_TAG}")
+    foreach (dataset_file IN ITEMS
+            nerf_synthetic.ixx
+            nerf_synthetic.cpp
+            dd_nerf.ixx
+            dd_nerf.cpp
+            scalar_real.ixx
+            scalar_real.cpp
     )
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set_property(TARGET hyfluid-app PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+        download_if_needed(
+                "https://raw.githubusercontent.com/Xayah-Graphics/dataset/${HYFLUID_DATASET_GIT_TAG}/${dataset_file}"
+                "${HYFLUID_DATASET_VENDOR_DIR}/${dataset_file}"
+        )
+    endforeach ()
+    download_if_needed(
+            "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image.h"
+    )
+
+    set(HYFLUID_FFMPEG_RELEASE_TAG "autobuild-2026-06-17-14-17")
+    if (WIN32)
+        set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1.2-win64-lgpl-shared-8.1")
+        set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "zip")
+        set(HYFLUID_FFMPEG_SHA256 "0ac5991693950b7f06483b19a4fa4752646d413d6535cb6310696de5baf7808f")
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HYFLUID_SYSTEM_PROCESSOR)
+        if (HYFLUID_SYSTEM_PROCESSOR STREQUAL "x86_64" OR HYFLUID_SYSTEM_PROCESSOR STREQUAL "amd64")
+            set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1.2-linux64-lgpl-shared-8.1")
+            set(HYFLUID_FFMPEG_ARCHIVE_EXTENSION "tar.xz")
+            set(HYFLUID_FFMPEG_SHA256 "dd8d149f5f774638d64fb791f88e341d05407a8a4073cb8e137a6bc86f6d1d1e")
+        else ()
+            message(FATAL_ERROR "Unsupported Linux processor for vendor FFmpeg: ${CMAKE_SYSTEM_PROCESSOR}")
+        endif ()
+    else ()
+        message(FATAL_ERROR "Unsupported platform for vendor FFmpeg: ${CMAKE_SYSTEM_NAME}")
+    endif ()
+    set(HYFLUID_FFMPEG_ARCHIVE_NAME "${HYFLUID_FFMPEG_NAME}.${HYFLUID_FFMPEG_ARCHIVE_EXTENSION}")
+    set(HYFLUID_FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/${HYFLUID_FFMPEG_RELEASE_TAG}/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
+    set(HYFLUID_FFMPEG_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/ffmpeg")
+    set(HYFLUID_FFMPEG_ARCHIVE "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}")
+    set(HYFLUID_FFMPEG_EXTRACT_DIR "${HYFLUID_FFMPEG_VENDOR_DIR}/extract")
+    set(HYFLUID_FFMPEG_MARKER "${HYFLUID_FFMPEG_VENDOR_DIR}/${HYFLUID_FFMPEG_ARCHIVE_NAME}.sha256")
+    set(HYFLUID_FFMPEG_ROOT "${HYFLUID_FFMPEG_EXTRACT_DIR}/${HYFLUID_FFMPEG_NAME}")
+    set(HYFLUID_FFMPEG_INCLUDE_DIR "${HYFLUID_FFMPEG_ROOT}/include")
+    set(HYFLUID_FFMPEG_LIB_DIR "${HYFLUID_FFMPEG_ROOT}/lib")
+    set(HYFLUID_FFMPEG_BIN_DIR "${HYFLUID_FFMPEG_ROOT}/bin")
+    if (WIN32)
+        set(HYFLUID_FFMPEG_LIBRARIES
+                "${HYFLUID_FFMPEG_LIB_DIR}/avformat.lib"
+                "${HYFLUID_FFMPEG_LIB_DIR}/avcodec.lib"
+                "${HYFLUID_FFMPEG_LIB_DIR}/swscale.lib"
+                "${HYFLUID_FFMPEG_LIB_DIR}/swresample.lib"
+                "${HYFLUID_FFMPEG_LIB_DIR}/avutil.lib"
+        )
+        set(HYFLUID_FFMPEG_RUNTIME_FILES
+                "${HYFLUID_FFMPEG_BIN_DIR}/avformat-62.dll"
+                "${HYFLUID_FFMPEG_BIN_DIR}/avcodec-62.dll"
+                "${HYFLUID_FFMPEG_BIN_DIR}/swscale-9.dll"
+                "${HYFLUID_FFMPEG_BIN_DIR}/swresample-6.dll"
+                "${HYFLUID_FFMPEG_BIN_DIR}/avutil-60.dll"
+        )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(HYFLUID_FFMPEG_LIBRARIES
+                "${HYFLUID_FFMPEG_LIB_DIR}/libavformat.so"
+                "${HYFLUID_FFMPEG_LIB_DIR}/libavcodec.so"
+                "${HYFLUID_FFMPEG_LIB_DIR}/libswscale.so"
+                "${HYFLUID_FFMPEG_LIB_DIR}/libswresample.so"
+                "${HYFLUID_FFMPEG_LIB_DIR}/libavutil.so"
+        )
+    endif ()
+
+    string(LENGTH "${HYFLUID_FFMPEG_SHA256}" HYFLUID_FFMPEG_SHA256_LENGTH)
+    if (NOT HYFLUID_FFMPEG_SHA256_LENGTH EQUAL 64)
+        message(FATAL_ERROR "Invalid configured SHA256 for ${HYFLUID_FFMPEG_ARCHIVE_NAME}")
+    endif ()
+    file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_VENDOR_DIR}")
+    message(STATUS "Downloading ${HYFLUID_FFMPEG_URL}")
+    file(DOWNLOAD
+            "${HYFLUID_FFMPEG_URL}"
+            "${HYFLUID_FFMPEG_ARCHIVE}"
+            EXPECTED_HASH "SHA256=${HYFLUID_FFMPEG_SHA256}"
+            TLS_VERIFY ON
+            STATUS HYFLUID_DOWNLOAD_STATUS
+    )
+    list(GET HYFLUID_DOWNLOAD_STATUS 0 HYFLUID_DOWNLOAD_CODE)
+    list(GET HYFLUID_DOWNLOAD_STATUS 1 HYFLUID_DOWNLOAD_MESSAGE)
+    if (NOT HYFLUID_DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download ${HYFLUID_FFMPEG_URL}: [${HYFLUID_DOWNLOAD_CODE}] ${HYFLUID_DOWNLOAD_MESSAGE}")
+    endif ()
+
+    set(HYFLUID_FFMPEG_EXISTING_SHA256 "")
+    if (EXISTS "${HYFLUID_FFMPEG_MARKER}")
+        file(READ "${HYFLUID_FFMPEG_MARKER}" HYFLUID_FFMPEG_EXISTING_SHA256)
+        string(STRIP "${HYFLUID_FFMPEG_EXISTING_SHA256}" HYFLUID_FFMPEG_EXISTING_SHA256)
+    endif ()
+    if (NOT HYFLUID_FFMPEG_EXISTING_SHA256 STREQUAL HYFLUID_FFMPEG_SHA256)
+        message(STATUS "Extracting ${HYFLUID_FFMPEG_ARCHIVE}")
+        file(REMOVE_RECURSE "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+        file(MAKE_DIRECTORY "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+        file(ARCHIVE_EXTRACT INPUT "${HYFLUID_FFMPEG_ARCHIVE}" DESTINATION "${HYFLUID_FFMPEG_EXTRACT_DIR}")
+        file(WRITE "${HYFLUID_FFMPEG_MARKER}" "${HYFLUID_FFMPEG_SHA256}\n")
+    endif ()
+    if (NOT IS_DIRECTORY "${HYFLUID_FFMPEG_INCLUDE_DIR}")
+        message(FATAL_ERROR "Vendor FFmpeg include directory is missing: ${HYFLUID_FFMPEG_INCLUDE_DIR}")
+    endif ()
+    foreach (HYFLUID_FFMPEG_FILE IN LISTS HYFLUID_FFMPEG_LIBRARIES HYFLUID_FFMPEG_RUNTIME_FILES)
+        if (NOT EXISTS "${HYFLUID_FFMPEG_FILE}")
+            message(FATAL_ERROR "Vendor FFmpeg file is missing: ${HYFLUID_FFMPEG_FILE}")
+        endif ()
+    endforeach ()
+
+    add_library(dataset-loader)
+    target_sources(
+            dataset-loader
+            PRIVATE
+            "${HYFLUID_DATASET_VENDOR_DIR}/nerf_synthetic.cpp"
+            "${HYFLUID_DATASET_VENDOR_DIR}/dd_nerf.cpp"
+            "${HYFLUID_DATASET_VENDOR_DIR}/scalar_real.cpp"
+            PUBLIC
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            "${HYFLUID_DATASET_VENDOR_DIR}/nerf_synthetic.ixx"
+            "${HYFLUID_DATASET_VENDOR_DIR}/dd_nerf.ixx"
+            "${HYFLUID_DATASET_VENDOR_DIR}/scalar_real.ixx"
+    )
+    target_include_directories(dataset-loader PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor" "${HYFLUID_FFMPEG_INCLUDE_DIR}")
+    target_link_libraries(dataset-loader PRIVATE ${HYFLUID_FFMPEG_LIBRARIES})
+    set_property(TARGET dataset-loader PROPERTY CXX_MODULE_STD ON)
+
+    add_library(hyfluid-xcli)
+    target_sources(
+            hyfluid-xcli
+            PRIVATE
+            benchmarks/xcli.cpp
+            PUBLIC
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            benchmarks/xcli.ixx
+    )
+    set_property(TARGET hyfluid-xcli PROPERTY CXX_MODULE_STD ON)
+
+    foreach (profile IN LISTS HYFLUID_BENCHMARK_PROFILES)
+        if (NOT profile IN_LIST HYFLUID_TRAIN_PROFILE_CHOICES)
+            message(FATAL_ERROR "Unknown HYFLUID_BENCHMARK_PROFILES entry '${profile}'. Supported profiles: ${HYFLUID_TRAIN_PROFILE_CHOICES}")
+        endif ()
+        string(MAKE_C_IDENTIFIER "${profile}" profile_definition_suffix)
+        string(TOUPPER "${profile_definition_suffix}" profile_definition_suffix)
+
+        add_library(hyfluid-train-${profile})
+        target_sources(
+                hyfluid-train-${profile}
+                PRIVATE
+                hyfluid.train.cpp
+                hyfluid.train.cu
+                hyfluid.train.config.h
+                hyfluid.train.h
+                PUBLIC
+                FILE_SET cxx_modules TYPE CXX_MODULES FILES
+                hyfluid.train.ixx
+        )
+        target_include_directories(hyfluid-train-${profile} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+        target_compile_definitions(hyfluid-train-${profile} PRIVATE "HYFLUID_TRAIN_PROFILE_${profile_definition_suffix}=1")
+        target_link_libraries(hyfluid-train-${profile} PRIVATE CUDA::cublas CUDA::cublasLt)
+        set_property(TARGET hyfluid-train-${profile} PROPERTY CXX_MODULE_STD ON)
+
+        add_executable(hyfluid-benchmark-${profile} benchmarks/main.cpp)
+        target_include_directories(hyfluid-benchmark-${profile} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+        target_compile_definitions(hyfluid-benchmark-${profile} PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${profile}\"")
+        target_link_libraries(hyfluid-benchmark-${profile} PRIVATE hyfluid-xcli dataset-loader hyfluid-train-${profile} CUDA::cudart)
+        if (WIN32)
+            add_custom_command(
+                    TARGET hyfluid-benchmark-${profile} POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-benchmark-${profile}>"
+            )
+        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            set_property(TARGET hyfluid-benchmark-${profile} PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+        endif ()
+        set_property(TARGET hyfluid-benchmark-${profile} PROPERTY CXX_MODULE_STD ON)
+    endforeach ()
 endif ()
-set_property(TARGET hyfluid-app PROPERTY CXX_MODULE_STD ON)
