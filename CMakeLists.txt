@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(HyFluid VERSION 1.0.0 LANGUAGES CXX CUDA)
 
-option(HYFLUID_BUILD_BENCHMARKS "Build optional HyFluid benchmark executables" OFF)
+option(HYFLUID_BUILD_APP "Build the optional HyFluid executable" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -38,16 +38,11 @@ endif ()
 find_package(CUDAToolkit 13.2 REQUIRED)
 
 set(HYFLUID_TRAIN_PROFILE "baseline" CACHE STRING "Compile-time HyFluid train profile")
-set(HYFLUID_TRAIN_PROFILE_CHOICES
-        baseline
-)
-set(HYFLUID_BENCHMARK_PROFILES "baseline" CACHE STRING "Semicolon-separated HyFluid benchmark profiles to build")
-set_property(CACHE HYFLUID_TRAIN_PROFILE PROPERTY STRINGS ${HYFLUID_TRAIN_PROFILE_CHOICES})
-if (NOT HYFLUID_TRAIN_PROFILE IN_LIST HYFLUID_TRAIN_PROFILE_CHOICES)
-    message(FATAL_ERROR "Unknown HYFLUID_TRAIN_PROFILE='${HYFLUID_TRAIN_PROFILE}'. Supported profiles: ${HYFLUID_TRAIN_PROFILE_CHOICES}")
+set_property(CACHE HYFLUID_TRAIN_PROFILE PROPERTY STRINGS baseline)
+if (NOT HYFLUID_TRAIN_PROFILE STREQUAL "baseline")
+    message(FATAL_ERROR "Unknown HYFLUID_TRAIN_PROFILE='${HYFLUID_TRAIN_PROFILE}'. Supported profiles: baseline")
 endif ()
-string(MAKE_C_IDENTIFIER "${HYFLUID_TRAIN_PROFILE}" HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX)
-string(TOUPPER "${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}" HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX)
+set(HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX "BASELINE")
 
 function(download_if_needed url out_path)
     if (EXISTS "${out_path}")
@@ -85,9 +80,9 @@ download_if_needed(
 # ============================================================================
 # Core Library
 # ============================================================================
-add_library(hyfluid-train)
+add_library(libhyfluid)
 target_sources(
-        hyfluid-train
+        libhyfluid
         PRIVATE
         hyfluid.train.cpp
         hyfluid.train.cu
@@ -97,18 +92,20 @@ target_sources(
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         hyfluid.train.ixx
 )
-target_include_directories(hyfluid-train PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-target_compile_definitions(hyfluid-train PRIVATE "HYFLUID_TRAIN_PROFILE_${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}=1")
-target_link_libraries(hyfluid-train PRIVATE CUDA::cublas CUDA::cublasLt)
-set_property(TARGET hyfluid-train PROPERTY CXX_MODULE_STD ON)
+target_include_directories(libhyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+target_compile_definitions(libhyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}=1")
+target_link_libraries(libhyfluid PRIVATE CUDA::cublas CUDA::cublasLt)
+set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 
 
 # ============================================================================
-# Optional Benchmarks
+# Optional App
 # ============================================================================
-if (HYFLUID_BUILD_BENCHMARKS)
+if (HYFLUID_BUILD_APP)
     set(HYFLUID_DATASET_GIT_TAG "bc636fbfc7507e8173156393f71c0b569f5fe95b")
     set(HYFLUID_DATASET_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/dataset/${HYFLUID_DATASET_GIT_TAG}")
+    set(HYFLUID_UTIL_GIT_TAG "bb261075e7c8a4722b23f42c3be01aa24024731a")
+    set(HYFLUID_UTIL_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/util/${HYFLUID_UTIL_GIT_TAG}")
     foreach (dataset_file IN ITEMS
             nerf_synthetic.ixx
             nerf_synthetic.cpp
@@ -125,6 +122,14 @@ if (HYFLUID_BUILD_BENCHMARKS)
     download_if_needed(
             "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
             "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image.h"
+    )
+    download_if_needed(
+            "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.ixx"
+            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
+    )
+    download_if_needed(
+            "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.cpp"
+            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
     )
 
     set(HYFLUID_FFMPEG_RELEASE_TAG "autobuild-2026-06-17-14-17")
@@ -236,53 +241,28 @@ if (HYFLUID_BUILD_BENCHMARKS)
     target_link_libraries(dataset-loader PRIVATE ${HYFLUID_FFMPEG_LIBRARIES})
     set_property(TARGET dataset-loader PROPERTY CXX_MODULE_STD ON)
 
-    add_library(hyfluid-xcli)
+    add_library(xayah-util-xcli)
     target_sources(
-            hyfluid-xcli
+            xayah-util-xcli
             PRIVATE
-            benchmarks/xcli.cpp
+            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
             PUBLIC
             FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            benchmarks/xcli.ixx
+            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
     )
-    set_property(TARGET hyfluid-xcli PROPERTY CXX_MODULE_STD ON)
+    set_property(TARGET xayah-util-xcli PROPERTY CXX_MODULE_STD ON)
 
-    foreach (profile IN LISTS HYFLUID_BENCHMARK_PROFILES)
-        if (NOT profile IN_LIST HYFLUID_TRAIN_PROFILE_CHOICES)
-            message(FATAL_ERROR "Unknown HYFLUID_BENCHMARK_PROFILES entry '${profile}'. Supported profiles: ${HYFLUID_TRAIN_PROFILE_CHOICES}")
-        endif ()
-        string(MAKE_C_IDENTIFIER "${profile}" profile_definition_suffix)
-        string(TOUPPER "${profile_definition_suffix}" profile_definition_suffix)
-
-        add_library(hyfluid-train-${profile})
-        target_sources(
-                hyfluid-train-${profile}
-                PRIVATE
-                hyfluid.train.cpp
-                hyfluid.train.cu
-                hyfluid.train.config.h
-                hyfluid.train.h
-                PUBLIC
-                FILE_SET cxx_modules TYPE CXX_MODULES FILES
-                hyfluid.train.ixx
+    add_executable(hyfluid main.cpp)
+    target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+    target_compile_definitions(hyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${HYFLUID_TRAIN_PROFILE}\"")
+    target_link_libraries(hyfluid PRIVATE xayah-util-xcli dataset-loader libhyfluid CUDA::cudart)
+    if (WIN32)
+        add_custom_command(
+                TARGET hyfluid POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid>"
         )
-        target_include_directories(hyfluid-train-${profile} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-        target_compile_definitions(hyfluid-train-${profile} PRIVATE "HYFLUID_TRAIN_PROFILE_${profile_definition_suffix}=1")
-        target_link_libraries(hyfluid-train-${profile} PRIVATE CUDA::cublas CUDA::cublasLt)
-        set_property(TARGET hyfluid-train-${profile} PROPERTY CXX_MODULE_STD ON)
-
-        add_executable(hyfluid-benchmark-${profile} benchmarks/main.cpp)
-        target_include_directories(hyfluid-benchmark-${profile} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-        target_compile_definitions(hyfluid-benchmark-${profile} PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${profile}\"")
-        target_link_libraries(hyfluid-benchmark-${profile} PRIVATE hyfluid-xcli dataset-loader hyfluid-train-${profile} CUDA::cudart)
-        if (WIN32)
-            add_custom_command(
-                    TARGET hyfluid-benchmark-${profile} POST_BUILD
-                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid-benchmark-${profile}>"
-            )
-        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            set_property(TARGET hyfluid-benchmark-${profile} PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
-        endif ()
-        set_property(TARGET hyfluid-benchmark-${profile} PROPERTY CXX_MODULE_STD ON)
-    endforeach ()
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set_property(TARGET hyfluid PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+    endif ()
+    set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
 endif ()

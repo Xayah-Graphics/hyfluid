@@ -21,14 +21,12 @@ cmake -B build -S . -G Ninja
 cmake --build build --parallel 30
 ```
 
-The default build only produces the core `hyfluid-train` library. Dataset loading, CLI parsing, and runnable training/evaluation entrypoints are intentionally kept outside the core library.
+The default build only produces the core `libhyfluid` library. Dataset loading, CLI parsing, and the runnable app are intentionally kept outside the core library. App builds download pinned dataset loaders from `Xayah-Graphics/dataset` and the pinned CLI module from `Xayah-Graphics/util`.
 
-#### Build Benchmarks
-
-Benchmark builds download dataset loader source files from `Xayah-Graphics/dataset` at the fixed commit configured by `HYFLUID_DATASET_GIT_TAG`. Only the `baseline` benchmark profile is built by default; later profiles can be enabled through `HYFLUID_BENCHMARK_PROFILES` without changing the benchmark structure.
+#### Build App
 
 ```
-cmake -B build-benchmarks -S . -G Ninja -DHYFLUID_BUILD_BENCHMARKS=ON
-cmake --build build-benchmarks --parallel 30
-build-benchmarks\hyfluid-benchmark-baseline.exe --help
+cmake -B build-app -S . -G Ninja -DHYFLUID_BUILD_APP=ON -DHYFLUID_TRAIN_PROFILE=baseline
+cmake --build build-app --parallel 30
+build-app\hyfluid.exe --help
 ```
