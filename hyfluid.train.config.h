@@ -10,8 +10,11 @@ namespace hyfluid::train::config {
 #endif
 
     inline constexpr std::string_view active_profile_name = "baseline";
-    inline constexpr std::uint32_t rgba_channel_count = 4u;
-    inline constexpr std::uint32_t camera_value_count = 12u;
+    inline constexpr std::uint32_t rgba_channel_count     = 4u;
+    inline constexpr std::uint32_t camera_value_count     = 12u;
+    inline constexpr std::uint32_t intrinsics_value_count = 4u;
+    inline constexpr std::uint32_t transform_value_count  = 16u;
+    inline constexpr std::uint32_t vector3_value_count    = 3u;
 } // namespace hyfluid::train::config
 
 #endif // HYFLUID_TRAIN_CONFIG_H
