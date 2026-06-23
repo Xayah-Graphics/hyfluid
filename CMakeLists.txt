@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
-project(HyFluid VERSION 1.0.0 LANGUAGES CXX CUDA)
+project(HyFluid VERSION 1.2.0 LANGUAGES CXX CUDA)
 
 option(HYFLUID_BUILD_APP "Build the optional HyFluid executable" OFF)
+option(HYFLUID_BUILD_PROJECT_PLUGIN "Build the Spectra scene project plugin" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -85,12 +86,15 @@ target_sources(
         libhyfluid
         PRIVATE
         hyfluid.train.cpp
+        hyfluid.inspector.cpp
         hyfluid.train.cu
+        hyfluid.inspector.cu
         hyfluid.train.config.h
         hyfluid.train.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         hyfluid.train.ixx
+        hyfluid.inspector.ixx
 )
 target_include_directories(libhyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
 target_compile_definitions(libhyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}=1")
@@ -99,13 +103,15 @@ set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 
 
 # ============================================================================
-# Optional App
+# Optional Dataset Loading
 # ============================================================================
-if (HYFLUID_BUILD_APP)
+if (HYFLUID_BUILD_APP OR HYFLUID_BUILD_PROJECT_PLUGIN)
     set(HYFLUID_DATASET_GIT_TAG "bc636fbfc7507e8173156393f71c0b569f5fe95b")
     set(HYFLUID_DATASET_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/dataset/${HYFLUID_DATASET_GIT_TAG}")
-    set(HYFLUID_UTIL_GIT_TAG "bb261075e7c8a4722b23f42c3be01aa24024731a")
-    set(HYFLUID_UTIL_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/util/${HYFLUID_UTIL_GIT_TAG}")
+    if (HYFLUID_BUILD_APP)
+        set(HYFLUID_UTIL_GIT_TAG "bb261075e7c8a4722b23f42c3be01aa24024731a")
+        set(HYFLUID_UTIL_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/util/${HYFLUID_UTIL_GIT_TAG}")
+    endif ()
     foreach (dataset_file IN ITEMS
             nerf_synthetic.ixx
             nerf_synthetic.cpp
@@ -123,14 +129,16 @@ if (HYFLUID_BUILD_APP)
             "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image.h"
             "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image.h"
     )
-    download_if_needed(
-            "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.ixx"
-            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
-    )
-    download_if_needed(
-            "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.cpp"
-            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
-    )
+    if (HYFLUID_BUILD_APP)
+        download_if_needed(
+                "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.ixx"
+                "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
+        )
+        download_if_needed(
+                "https://raw.githubusercontent.com/Xayah-Graphics/util/${HYFLUID_UTIL_GIT_TAG}/xcli.cpp"
+                "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
+        )
+    endif ()
 
     set(HYFLUID_FFMPEG_RELEASE_TAG "autobuild-2026-06-17-14-17")
     if (WIN32)
@@ -241,28 +249,59 @@ if (HYFLUID_BUILD_APP)
     target_link_libraries(dataset-loader PRIVATE ${HYFLUID_FFMPEG_LIBRARIES})
     set_property(TARGET dataset-loader PROPERTY CXX_MODULE_STD ON)
 
-    add_library(xayah-util-xcli)
-    target_sources(
-            xayah-util-xcli
-            PRIVATE
-            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
-            PUBLIC
-            FILE_SET cxx_modules TYPE CXX_MODULES FILES
-            "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
-    )
-    set_property(TARGET xayah-util-xcli PROPERTY CXX_MODULE_STD ON)
+    if (HYFLUID_BUILD_APP)
+        add_library(xayah-util-xcli)
+        target_sources(
+                xayah-util-xcli
+                PRIVATE
+                "${HYFLUID_UTIL_VENDOR_DIR}/xcli.cpp"
+                PUBLIC
+                FILE_SET cxx_modules TYPE CXX_MODULES FILES
+                "${HYFLUID_UTIL_VENDOR_DIR}/xcli.ixx"
+        )
+        set_property(TARGET xayah-util-xcli PROPERTY CXX_MODULE_STD ON)
 
-    add_executable(hyfluid main.cpp)
-    target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
-    target_compile_definitions(hyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${HYFLUID_TRAIN_PROFILE}\"")
-    target_link_libraries(hyfluid PRIVATE xayah-util-xcli dataset-loader libhyfluid CUDA::cudart)
+        add_executable(hyfluid main.cpp)
+        target_include_directories(hyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+        target_compile_definitions(hyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${HYFLUID_TRAIN_PROFILE}\"")
+        target_link_libraries(hyfluid PRIVATE xayah-util-xcli dataset-loader libhyfluid CUDA::cudart)
+        if (WIN32)
+            add_custom_command(
+                    TARGET hyfluid POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid>"
+            )
+        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            set_property(TARGET hyfluid PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+        endif ()
+        set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
+    endif ()
+endif ()
+
+
+# ============================================================================
+# Optional Spectra Project Plugin
+# ============================================================================
+if (HYFLUID_BUILD_PROJECT_PLUGIN)
+    add_library(hyfluid_project_plugin SHARED)
+    target_sources(
+            hyfluid_project_plugin
+            PRIVATE
+            hyfluid.project.cpp
+            PRIVATE
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            hyfluid.plugin.ixx
+            hyfluid.project.ixx
+    )
+    target_include_directories(hyfluid_project_plugin PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+    target_compile_definitions(hyfluid_project_plugin PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${HYFLUID_TRAIN_PROFILE}\"")
+    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-loader libhyfluid CUDA::cudart)
     if (WIN32)
         add_custom_command(
-                TARGET hyfluid POST_BUILD
-                COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid>"
+                TARGET hyfluid_project_plugin POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} "$<TARGET_FILE_DIR:hyfluid_project_plugin>"
         )
     elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        set_property(TARGET hyfluid PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+        set_property(TARGET hyfluid_project_plugin PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
     endif ()
-    set_property(TARGET hyfluid PROPERTY CXX_MODULE_STD ON)
+    set_property(TARGET hyfluid_project_plugin PROPERTY CXX_MODULE_STD ON)
 endif ()

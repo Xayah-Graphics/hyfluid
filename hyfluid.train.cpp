@@ -80,12 +80,22 @@ namespace hyfluid::train {
             }
 
             this->host.current_step = 0u;
-            this->host.rays_per_batch = hyfluid::train::config::initial_rays_per_batch;
-            this->host.inference_sample_count = hyfluid::train::config::max_samples;
+            this->host.rays_per_batch = config::initial_rays_per_batch;
+            this->host.inference_sample_count = config::max_samples;
             this->host.measured_sample_count_before_compaction = 0u;
             this->host.measured_sample_count = 0u;
             this->host.density_grid_ema_step = 0u;
             this->host.density_grid_occupied_cells = 0u;
+
+            // ====================================================================================================
+            // 3. INITIALIZE DIRECT DENSITY GRID
+            // ====================================================================================================
+            {
+                const HostFrameSet& host_frame_set = this->host.frame_sets.front();
+                const DeviceFrameSet& device_frame_set = this->device.frame_sets.front();
+                cuda::update_density_grid(device_frame_set.camera, host_frame_set.frame_count, host_frame_set.width, host_frame_set.height, host_frame_set.focal_x, host_frame_set.focal_y, host_frame_set.principal_x, host_frame_set.principal_y, this->host.current_step, this->device.params, this->device.sample_coords, this->device.density_input, this->device.network_output, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.density_grid_occupied_count, this->device.occupancy, this->host.density_grid_ema_step, true);
+                cuda::read_counter(this->device.density_grid_occupied_count, this->host.density_grid_occupied_cells);
+            }
 
         } catch (...) {
             for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera);
@@ -122,7 +132,8 @@ namespace hyfluid::train {
             std::uint32_t loss_value_count    = this->host.rays_per_batch;
             for (std::int32_t i = 0; i < request.iterations; ++i) {
                 loss_value_count = this->host.rays_per_batch;
-                cuda::update_density_grid(device_frame_set->camera, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, host_frame_set->focal_x, host_frame_set->focal_y, host_frame_set->principal_x, host_frame_set->principal_y, this->host.current_step, this->device.params, this->device.sample_coords, this->device.density_input, this->device.network_output, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.density_grid_occupied_count, this->device.occupancy, this->host.density_grid_ema_step);
+                const bool reset_density_grid = this->host.density_grid_ema_step == 0u;
+                cuda::update_density_grid(device_frame_set->camera, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, host_frame_set->focal_x, host_frame_set->focal_y, host_frame_set->principal_x, host_frame_set->principal_y, this->host.current_step, this->device.params, this->device.sample_coords, this->device.density_input, this->device.network_output, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.density_grid_occupied_count, this->device.occupancy, this->host.density_grid_ema_step, reset_density_grid);
                 cuda::sample_training_batch(device_frame_set->camera, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, host_frame_set->focal_x, host_frame_set->focal_y, host_frame_set->principal_x, host_frame_set->principal_y, this->host.current_step, this->host.rays_per_batch, this->host.inference_sample_count, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
                 cuda::evaluate_network(this->host.inference_sample_count, this->device.sample_coords, this->device.params, this->device.density_input, this->device.rgb_input, this->device.network_output);
                 cuda::compute_training_loss_and_compact_samples(this->host.rays_per_batch, this->host.current_step, this->device.ray_counter, device_frame_set->pixels, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, this->device.network_output, this->device.compacted_sample_counter, this->device.ray_indices, this->device.rays, this->device.numsteps, this->device.sample_coords, this->device.compacted_sample_coords, this->device.network_output_gradients, this->device.loss_values);
@@ -137,8 +148,8 @@ namespace hyfluid::train {
                     throw std::runtime_error{std::format("Optimization stopped unexpectedly. density_grid_occupied_cells={}", this->host.density_grid_occupied_cells)};
                 }
 
-                this->host.inference_sample_count = ((std::min(this->host.measured_sample_count_before_compaction, hyfluid::train::config::max_samples) + hyfluid::train::config::network_batch_granularity - 1u) / hyfluid::train::config::network_batch_granularity) * hyfluid::train::config::network_batch_granularity;
-                this->host.rays_per_batch         = std::min(std::max(((static_cast<std::uint32_t>(std::min((static_cast<std::uint64_t>(this->host.rays_per_batch) * hyfluid::train::config::network_batch_size) / this->host.measured_sample_count, static_cast<std::uint64_t>(hyfluid::train::config::network_batch_size))) + hyfluid::train::config::network_batch_granularity - 1u) / hyfluid::train::config::network_batch_granularity) * hyfluid::train::config::network_batch_granularity, hyfluid::train::config::network_batch_granularity), hyfluid::train::config::network_batch_size);
+                this->host.inference_sample_count = ((std::min(this->host.measured_sample_count_before_compaction, config::max_samples) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
+                this->host.rays_per_batch         = std::min(std::max(((static_cast<std::uint32_t>(std::min((static_cast<std::uint64_t>(this->host.rays_per_batch) * config::network_batch_size) / this->host.measured_sample_count, static_cast<std::uint64_t>(config::network_batch_size))) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity, config::network_batch_granularity), config::network_batch_size);
 
                 ++this->host.current_step;
             }
@@ -152,10 +163,10 @@ namespace hyfluid::train {
                 .measured_sample_count_before_compaction = this->host.measured_sample_count_before_compaction,
                 .measured_sample_count                   = this->host.measured_sample_count,
                 .density_grid_occupied_cells             = this->host.density_grid_occupied_cells,
-                .loss                                    = loss_sum * static_cast<float>(this->host.measured_sample_count) / static_cast<float>(hyfluid::train::config::network_batch_size),
+                .loss                                    = loss_sum * static_cast<float>(this->host.measured_sample_count) / static_cast<float>(config::network_batch_size),
                 .elapsed_ms                              = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - train_start).count(),
                 .sample_efficiency_ratio                 = this->host.measured_sample_count_before_compaction == 0u ? 0.0f : static_cast<float>(this->host.measured_sample_count) / static_cast<float>(this->host.measured_sample_count_before_compaction),
-                .density_grid_occupancy_ratio            = static_cast<float>(this->host.density_grid_occupied_cells) / static_cast<float>(hyfluid::train::config::nerf_grid_cells),
+                .density_grid_occupancy_ratio            = static_cast<float>(this->host.density_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
             };
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
@@ -175,8 +186,7 @@ namespace hyfluid::train {
                 }
             }
             if (host_frame_set == nullptr || device_frame_set == nullptr) throw std::runtime_error{std::format("evaluation frame set '{}' is not loaded.", request.frame_set)};
-            if (request.refresh_acceleration) this->host.density_grid_ema_step = 0u;
-            if (this->host.density_grid_ema_step == 0u) cuda::update_density_grid(device_frame_set->camera, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, host_frame_set->focal_x, host_frame_set->focal_y, host_frame_set->principal_x, host_frame_set->principal_y, 0u, this->device.params, this->device.sample_coords, this->device.density_input, this->device.network_output, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.density_grid_occupied_count, this->device.occupancy, this->host.density_grid_ema_step);
+            if (this->host.density_grid_ema_step == 0u) cuda::update_density_grid(device_frame_set->camera, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, host_frame_set->focal_x, host_frame_set->focal_y, host_frame_set->principal_x, host_frame_set->principal_y, 0u, this->device.params, this->device.sample_coords, this->device.density_input, this->device.network_output, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.density_grid_occupied_count, this->device.occupancy, this->host.density_grid_ema_step, true);
 
             const bool writes_comparison = request.comparison_output_dir.has_value();
             if (writes_comparison) {
@@ -246,38 +256,38 @@ namespace hyfluid::train {
             };
 
             constexpr std::array tensors = std::to_array<SafetensorsTensor>({
-                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = hyfluid::train::config::network_parameter_layout.density_input_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::grid_output_width},
-                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = hyfluid::train::config::network_parameter_layout.density_output_weight_offset, .rows = hyfluid::train::config::density_output_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "rgb_mlp.input.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_input_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::rgb_input_width},
-                SafetensorsTensor{.name = "rgb_mlp.hidden.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_hidden_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "rgb_mlp.output.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_output_weight_offset, .rows = hyfluid::train::config::network_output_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "hash_grid.params", .param_offset = hyfluid::train::config::network_parameter_layout.grid_param_offset, .rows = hyfluid::train::config::network_parameter_layout.grid_offsets[hyfluid::train::config::grid_n_levels], .cols = hyfluid::train::config::grid_features_per_level},
+                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = config::network_parameter_layout.density_input_weight_offset, .rows = config::mlp_width, .cols = config::grid_output_width},
+                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = config::network_parameter_layout.density_output_weight_offset, .rows = config::density_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "rgb_mlp.input.weight", .param_offset = config::network_parameter_layout.rgb_input_weight_offset, .rows = config::mlp_width, .cols = config::rgb_input_width},
+                SafetensorsTensor{.name = "rgb_mlp.hidden.weight", .param_offset = config::network_parameter_layout.rgb_hidden_weight_offset, .rows = config::mlp_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "rgb_mlp.output.weight", .param_offset = config::network_parameter_layout.rgb_output_weight_offset, .rows = config::network_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "hash_grid.params", .param_offset = config::network_parameter_layout.grid_param_offset, .rows = config::network_parameter_layout.grid_offsets[config::grid_n_levels], .cols = config::grid_features_per_level},
             });
 
-            std::vector<float> host_params(hyfluid::train::config::network_parameter_layout.total_param_count);
+            std::vector<float> host_params(config::network_parameter_layout.total_param_count);
             cuda::download_trainable_parameters(this->device.params_full_precision, host_params.data());
 
             std::string grid_offsets_text;
-            for (std::uint32_t i = 0u; i < hyfluid::train::config::grid_n_levels + 1u; ++i) {
+            for (std::uint32_t i = 0u; i < config::grid_n_levels + 1u; ++i) {
                 if (!grid_offsets_text.empty()) grid_offsets_text += ",";
-                grid_offsets_text += std::format("{}", hyfluid::train::config::network_parameter_layout.grid_offsets[i]);
+                grid_offsets_text += std::format("{}", config::network_parameter_layout.grid_offsets[i]);
             }
 
             nlohmann::json metadata             = nlohmann::json::object();
             metadata["format"]                  = "hyfluid.train.weights.v1";
-            metadata["train_profile"]           = std::string{hyfluid::train::config::active_profile_name};
-            metadata["architecture_fingerprint"] = std::format("grid:l{}:f{}:base{}:hash{}:offsets{}|mlp:w{}:density{}:rgb{}:dout{}:dir{}:out{}", hyfluid::train::config::grid_n_levels, hyfluid::train::config::grid_features_per_level, hyfluid::train::config::grid_base_resolution, hyfluid::train::config::grid_log2_hashmap_size, grid_offsets_text, hyfluid::train::config::mlp_width, hyfluid::train::config::density_hidden_layers, hyfluid::train::config::rgb_hidden_layers, hyfluid::train::config::density_output_width, hyfluid::train::config::direction_output_width, hyfluid::train::config::network_output_width);
-            metadata["grid_n_levels"]           = std::format("{}", hyfluid::train::config::grid_n_levels);
-            metadata["grid_features_per_level"] = std::format("{}", hyfluid::train::config::grid_features_per_level);
-            metadata["grid_base_resolution"]    = std::format("{}", hyfluid::train::config::grid_base_resolution);
-            metadata["grid_log2_hashmap_size"]  = std::format("{}", hyfluid::train::config::grid_log2_hashmap_size);
-            metadata["mlp_width"]               = std::format("{}", hyfluid::train::config::mlp_width);
-            metadata["density_hidden_layers"]   = std::format("{}", hyfluid::train::config::density_hidden_layers);
-            metadata["rgb_hidden_layers"]       = std::format("{}", hyfluid::train::config::rgb_hidden_layers);
-            metadata["density_output_width"]    = std::format("{}", hyfluid::train::config::density_output_width);
-            metadata["direction_output_width"]  = std::format("{}", hyfluid::train::config::direction_output_width);
-            metadata["rgb_input_width"]         = std::format("{}", hyfluid::train::config::rgb_input_width);
-            metadata["network_output_width"]    = std::format("{}", hyfluid::train::config::network_output_width);
+            metadata["train_profile"]           = std::string{config::active_profile_name};
+            metadata["architecture_fingerprint"] = std::format("grid:l{}:f{}:base{}:hash{}:offsets{}|mlp:w{}:density{}:rgb{}:dout{}:dir{}:out{}", config::grid_n_levels, config::grid_features_per_level, config::grid_base_resolution, config::grid_log2_hashmap_size, grid_offsets_text, config::mlp_width, config::density_hidden_layers, config::rgb_hidden_layers, config::density_output_width, config::direction_output_width, config::network_output_width);
+            metadata["grid_n_levels"]           = std::format("{}", config::grid_n_levels);
+            metadata["grid_features_per_level"] = std::format("{}", config::grid_features_per_level);
+            metadata["grid_base_resolution"]    = std::format("{}", config::grid_base_resolution);
+            metadata["grid_log2_hashmap_size"]  = std::format("{}", config::grid_log2_hashmap_size);
+            metadata["mlp_width"]               = std::format("{}", config::mlp_width);
+            metadata["density_hidden_layers"]   = std::format("{}", config::density_hidden_layers);
+            metadata["rgb_hidden_layers"]       = std::format("{}", config::rgb_hidden_layers);
+            metadata["density_output_width"]    = std::format("{}", config::density_output_width);
+            metadata["direction_output_width"]  = std::format("{}", config::direction_output_width);
+            metadata["rgb_input_width"]         = std::format("{}", config::rgb_input_width);
+            metadata["network_output_width"]    = std::format("{}", config::network_output_width);
             metadata["grid_offsets"]            = grid_offsets_text;
             metadata["scene_scale"]             = std::format("{:.9g}", this->host.scene_scale);
 
@@ -327,35 +337,35 @@ namespace hyfluid::train {
             };
 
             constexpr std::array tensors = std::to_array<SafetensorsTensor>({
-                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = hyfluid::train::config::network_parameter_layout.density_input_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::grid_output_width},
-                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = hyfluid::train::config::network_parameter_layout.density_output_weight_offset, .rows = hyfluid::train::config::density_output_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "rgb_mlp.input.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_input_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::rgb_input_width},
-                SafetensorsTensor{.name = "rgb_mlp.hidden.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_hidden_weight_offset, .rows = hyfluid::train::config::mlp_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "rgb_mlp.output.weight", .param_offset = hyfluid::train::config::network_parameter_layout.rgb_output_weight_offset, .rows = hyfluid::train::config::network_output_width, .cols = hyfluid::train::config::mlp_width},
-                SafetensorsTensor{.name = "hash_grid.params", .param_offset = hyfluid::train::config::network_parameter_layout.grid_param_offset, .rows = hyfluid::train::config::network_parameter_layout.grid_offsets[hyfluid::train::config::grid_n_levels], .cols = hyfluid::train::config::grid_features_per_level},
+                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = config::network_parameter_layout.density_input_weight_offset, .rows = config::mlp_width, .cols = config::grid_output_width},
+                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = config::network_parameter_layout.density_output_weight_offset, .rows = config::density_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "rgb_mlp.input.weight", .param_offset = config::network_parameter_layout.rgb_input_weight_offset, .rows = config::mlp_width, .cols = config::rgb_input_width},
+                SafetensorsTensor{.name = "rgb_mlp.hidden.weight", .param_offset = config::network_parameter_layout.rgb_hidden_weight_offset, .rows = config::mlp_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "rgb_mlp.output.weight", .param_offset = config::network_parameter_layout.rgb_output_weight_offset, .rows = config::network_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "hash_grid.params", .param_offset = config::network_parameter_layout.grid_param_offset, .rows = config::network_parameter_layout.grid_offsets[config::grid_n_levels], .cols = config::grid_features_per_level},
             });
 
             std::string grid_offsets_text;
-            for (std::uint32_t i = 0u; i < hyfluid::train::config::grid_n_levels + 1u; ++i) {
+            for (std::uint32_t i = 0u; i < config::grid_n_levels + 1u; ++i) {
                 if (!grid_offsets_text.empty()) grid_offsets_text += ",";
-                grid_offsets_text += std::format("{}", hyfluid::train::config::network_parameter_layout.grid_offsets[i]);
+                grid_offsets_text += std::format("{}", config::network_parameter_layout.grid_offsets[i]);
             }
 
             nlohmann::json expected_metadata             = nlohmann::json::object();
             expected_metadata["format"]                  = "hyfluid.train.weights.v1";
-            expected_metadata["train_profile"]           = std::string{hyfluid::train::config::active_profile_name};
-            expected_metadata["architecture_fingerprint"] = std::format("grid:l{}:f{}:base{}:hash{}:offsets{}|mlp:w{}:density{}:rgb{}:dout{}:dir{}:out{}", hyfluid::train::config::grid_n_levels, hyfluid::train::config::grid_features_per_level, hyfluid::train::config::grid_base_resolution, hyfluid::train::config::grid_log2_hashmap_size, grid_offsets_text, hyfluid::train::config::mlp_width, hyfluid::train::config::density_hidden_layers, hyfluid::train::config::rgb_hidden_layers, hyfluid::train::config::density_output_width, hyfluid::train::config::direction_output_width, hyfluid::train::config::network_output_width);
-            expected_metadata["grid_n_levels"]           = std::format("{}", hyfluid::train::config::grid_n_levels);
-            expected_metadata["grid_features_per_level"] = std::format("{}", hyfluid::train::config::grid_features_per_level);
-            expected_metadata["grid_base_resolution"]    = std::format("{}", hyfluid::train::config::grid_base_resolution);
-            expected_metadata["grid_log2_hashmap_size"]  = std::format("{}", hyfluid::train::config::grid_log2_hashmap_size);
-            expected_metadata["mlp_width"]               = std::format("{}", hyfluid::train::config::mlp_width);
-            expected_metadata["density_hidden_layers"]   = std::format("{}", hyfluid::train::config::density_hidden_layers);
-            expected_metadata["rgb_hidden_layers"]       = std::format("{}", hyfluid::train::config::rgb_hidden_layers);
-            expected_metadata["density_output_width"]    = std::format("{}", hyfluid::train::config::density_output_width);
-            expected_metadata["direction_output_width"]  = std::format("{}", hyfluid::train::config::direction_output_width);
-            expected_metadata["rgb_input_width"]         = std::format("{}", hyfluid::train::config::rgb_input_width);
-            expected_metadata["network_output_width"]    = std::format("{}", hyfluid::train::config::network_output_width);
+            expected_metadata["train_profile"]           = std::string{config::active_profile_name};
+            expected_metadata["architecture_fingerprint"] = std::format("grid:l{}:f{}:base{}:hash{}:offsets{}|mlp:w{}:density{}:rgb{}:dout{}:dir{}:out{}", config::grid_n_levels, config::grid_features_per_level, config::grid_base_resolution, config::grid_log2_hashmap_size, grid_offsets_text, config::mlp_width, config::density_hidden_layers, config::rgb_hidden_layers, config::density_output_width, config::direction_output_width, config::network_output_width);
+            expected_metadata["grid_n_levels"]           = std::format("{}", config::grid_n_levels);
+            expected_metadata["grid_features_per_level"] = std::format("{}", config::grid_features_per_level);
+            expected_metadata["grid_base_resolution"]    = std::format("{}", config::grid_base_resolution);
+            expected_metadata["grid_log2_hashmap_size"]  = std::format("{}", config::grid_log2_hashmap_size);
+            expected_metadata["mlp_width"]               = std::format("{}", config::mlp_width);
+            expected_metadata["density_hidden_layers"]   = std::format("{}", config::density_hidden_layers);
+            expected_metadata["rgb_hidden_layers"]       = std::format("{}", config::rgb_hidden_layers);
+            expected_metadata["density_output_width"]    = std::format("{}", config::density_output_width);
+            expected_metadata["direction_output_width"]  = std::format("{}", config::direction_output_width);
+            expected_metadata["rgb_input_width"]         = std::format("{}", config::rgb_input_width);
+            expected_metadata["network_output_width"]    = std::format("{}", config::network_output_width);
             expected_metadata["grid_offsets"]            = grid_offsets_text;
             expected_metadata["scene_scale"]             = std::format("{:.9g}", this->host.scene_scale);
 
@@ -413,7 +423,7 @@ namespace hyfluid::train {
             if (!data.empty()) input.read(data.data(), static_cast<std::streamsize>(data.size()));
             if (!input) throw std::runtime_error{"failed to read safetensors tensor data."};
 
-            std::vector host_params(hyfluid::train::config::network_parameter_layout.total_param_count, 0.0f);
+            std::vector host_params(config::network_parameter_layout.total_param_count, 0.0f);
             std::uint64_t data_offset = 0u;
             for (const SafetensorsTensor& tensor : tensors) {
                 const std::uint64_t byte_count = tensor.rows * tensor.cols * sizeof(float);

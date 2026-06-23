@@ -57,7 +57,6 @@ namespace hyfluid::train {
     export struct EvaluationRequest final {
         std::string_view frame_set;
         std::optional<std::filesystem::path> comparison_output_dir;
-        bool refresh_acceleration = false;
     };
 
     export struct OptimizationStats final {
@@ -84,8 +83,7 @@ namespace hyfluid::train {
         std::filesystem::path output_dir;
     };
 
-    export class HyFluid final {
-    public:
+    export struct HyFluid final {
         template <DatasetLike Dataset>
         explicit HyFluid(const Dataset& dataset) {
             std::vector<std::string_view> frame_set_names;
@@ -129,7 +127,6 @@ namespace hyfluid::train {
         std::expected<void, std::string> export_weights(const std::filesystem::path& path) const;
         std::expected<void, std::string> load_weights(const std::filesystem::path& path);
 
-    private:
         void initialize(std::span<const FrameSetView> frame_sets, float scene_scale);
 
         struct HostFrameSet final {
