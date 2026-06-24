@@ -100,7 +100,20 @@ export namespace hyfluid::plugin {
         std::optional<CameraImage> image;
     };
 
+    enum class TimelineKind : std::uint32_t {
+        Static = 0u,
+        Live = 1u,
+        Indexed = 2u,
+    };
+
+    struct TimelineDescriptor final {
+        TimelineKind kind{TimelineKind::Static};
+        double frame_rate{24.0};
+        std::uint64_t frame_count{};
+    };
+
     struct Document final {
+        TimelineDescriptor timeline;
         std::string active_camera_name;
         std::vector<Camera> cameras;
     };
@@ -213,7 +226,6 @@ export namespace hyfluid::plugin {
         std::string id;
         std::string title;
         std::string open_action_label;
-        double frames_per_second{};
         std::vector<ControlSection> sections;
         std::vector<OptionSchema> open_options;
     };
@@ -222,7 +234,6 @@ export namespace hyfluid::plugin {
         std::string id;
         std::string title;
         std::string open_action_label;
-        double frames_per_second{};
         std::vector<ControlSection> sections;
         std::vector<OptionSchema> open_options;
         void* (*open)(const OpenContext&) = nullptr;
@@ -240,7 +251,6 @@ export namespace hyfluid::plugin {
             .id = definition.id,
             .title = definition.title,
             .open_action_label = definition.open_action_label,
-            .frames_per_second = definition.frames_per_second,
             .sections = definition.sections,
             .open_options = definition.open_options,
             .open = [](const OpenContext& context) -> void* { return new Project(Project::open(context)); },
@@ -253,11 +263,14 @@ export namespace hyfluid::plugin {
         };
     }
 
-    constexpr std::uint32_t plugin_abi_version = 12u;
+    constexpr std::uint32_t plugin_abi_version = 13u;
     typedef void SpectraSceneInstance;
     typedef std::uint32_t SpectraSceneResult;
     constexpr std::uint32_t SPECTRA_SCENE_RESULT_OK = 0u;
     constexpr std::uint32_t SPECTRA_SCENE_RESULT_ERROR = 1u;
+    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_STATIC = 0u;
+    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_LIVE = 1u;
+    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_INDEXED = 2u;
     constexpr std::uint32_t SPECTRA_SCENE_OPTION_TEXT = 0u;
     constexpr std::uint32_t SPECTRA_SCENE_OPTION_DIRECTORY_PATH = 1u;
     constexpr std::uint32_t SPECTRA_SCENE_OPTION_FLOAT = 5u;
@@ -447,8 +460,15 @@ export namespace hyfluid::plugin {
         SpectraSceneViewportVoxelGridSpan viewport_voxel_grids{};
     };
 
+    struct SpectraSceneTimeline {
+        std::uint32_t kind{};
+        double frame_rate{};
+        std::uint64_t frame_count{};
+    };
+
     struct SpectraSceneDocumentView {
         std::uint64_t struct_size{};
+        SpectraSceneTimeline timeline{};
         const char* active_camera_name{};
         SpectraSceneItems items{};
     };
@@ -481,7 +501,6 @@ export namespace hyfluid::plugin {
         const char* id{};
         const char* title{};
         const char* open_action_label{};
-        double frames_per_second{};
         SpectraSceneControlSectionSpan sections{};
         SpectraSceneControlOptionSchemaSpan open_options{};
         SpectraSceneControlActionSpan control_actions{};
@@ -585,12 +604,27 @@ export namespace hyfluid::plugin {
         };
     }
 
+    [[nodiscard]] inline SpectraSceneTimeline make_timeline_view(const TimelineDescriptor& timeline) {
+        std::uint32_t kind{};
+        switch (timeline.kind) {
+        case TimelineKind::Static: kind = SPECTRA_SCENE_TIMELINE_STATIC; break;
+        case TimelineKind::Live: kind = SPECTRA_SCENE_TIMELINE_LIVE; break;
+        case TimelineKind::Indexed: kind = SPECTRA_SCENE_TIMELINE_INDEXED; break;
+        }
+        return SpectraSceneTimeline{
+            .kind = kind,
+            .frame_rate = timeline.frame_rate,
+            .frame_count = timeline.frame_count,
+        };
+    }
+
     [[nodiscard]] inline SpectraSceneDocumentView make_document_abi_view(SceneAbiStorage& cache) {
         cache.camera_views.clear();
         cache.camera_views.reserve(cache.document.cameras.size());
         for (const Camera& camera : cache.document.cameras) cache.camera_views.push_back(make_camera_view(camera));
         return SpectraSceneDocumentView{
             .struct_size = sizeof(SpectraSceneDocumentView),
+            .timeline = make_timeline_view(cache.document.timeline),
             .active_camera_name = cache.document.active_camera_name.c_str(),
             .items = make_items_view(cache.camera_views),
         };
@@ -654,7 +688,6 @@ export namespace hyfluid::plugin {
             .id = definition.id.c_str(),
             .title = definition.title.c_str(),
             .open_action_label = definition.open_action_label.c_str(),
-            .frames_per_second = definition.frames_per_second,
             .sections = SpectraSceneControlSectionSpan{.data = storage.sections.empty() ? nullptr : storage.sections.data(), .count = static_cast<std::uint64_t>(storage.sections.size())},
             .open_options = SpectraSceneControlOptionSchemaSpan{.data = storage.open_options.empty() ? nullptr : storage.open_options.data(), .count = static_cast<std::uint64_t>(storage.open_options.size())},
         };

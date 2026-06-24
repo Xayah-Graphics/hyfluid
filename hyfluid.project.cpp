@@ -256,6 +256,8 @@ namespace hyfluid::project {
         std::vector<FrameSetRuntime> frame_sets;
         std::uint64_t pixel_bytes{};
         std::uint64_t frame_count{};
+        std::uint64_t timeline_frame_count{};
+        double timeline_frame_rate{};
         double latest_time_seconds{};
         bool host_timeline_playing{true};
     };
@@ -271,7 +273,6 @@ namespace hyfluid::project {
             .id                = "hyfluid.project",
             .title             = "HyFluid Project",
             .open_action_label = "Open Dataset",
-            .frames_per_second = 60.0,
             .sections          = {
                 plugin::section(section_dataset_id, "Dataset"),
                 plugin::section(section_timeline_id, "Timeline"),
@@ -340,8 +341,16 @@ namespace hyfluid::project {
                 runtime.visible_views.push_back(view_index);
             }
             if (runtime.visible_views.empty()) throw std::runtime_error{std::format("ScalarReal frame set '{}' view selection is empty.", frame_set.name)};
+            if (state->timeline_frame_count == 0u) {
+                state->timeline_frame_count = runtime.time_count;
+                state->timeline_frame_rate = static_cast<double>(runtime.frame_rate);
+            } else {
+                if (state->timeline_frame_count != runtime.time_count) throw std::runtime_error{"Selected ScalarReal frame sets must have the same time count for a single Spectra indexed timeline."};
+                if (state->timeline_frame_rate != static_cast<double>(runtime.frame_rate)) throw std::runtime_error{"Selected ScalarReal frame sets must have the same frame rate for a single Spectra indexed timeline."};
+            }
             state->frame_sets.push_back(std::move(runtime));
         }
+        if (state->timeline_frame_count == 0u || state->timeline_frame_rate <= 0.0) throw std::runtime_error{"ScalarReal indexed timeline is empty."};
 
         return Project{std::move(state)};
     }
@@ -363,6 +372,11 @@ namespace hyfluid::project {
     plugin::Document Project::document() const {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
         return plugin::Document{
+            .timeline = plugin::TimelineDescriptor{
+                .kind = plugin::TimelineKind::Indexed,
+                .frame_rate = this->state->timeline_frame_rate,
+                .frame_count = this->state->timeline_frame_count,
+            },
             .active_camera_name = "Overview",
             .cameras = {overview_camera()},
         };
@@ -376,7 +390,8 @@ namespace hyfluid::project {
         plugin::Frame output;
         for (const FrameSetRuntime& runtime : this->state->frame_sets) {
             const dataset::scalar_real::FrameSet& frame_set = this->state->dataset.frame_sets.at(runtime.dataset_frame_set_index);
-            const std::uint32_t time_index = static_cast<std::uint32_t>(std::floor(frame.time_seconds * static_cast<double>(runtime.frame_rate))) % runtime.time_count;
+            if (frame.frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project requested frame outside indexed timeline."};
+            const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
             for (const std::uint32_t view_index : runtime.visible_views) {
                 const std::uint32_t frame_index = runtime.frame_indices.at(view_index * runtime.time_count + time_index);
                 const dataset::scalar_real::Frame& scalar_frame = frame_set.frames.at(frame_index);
@@ -408,6 +423,6 @@ namespace hyfluid::project {
     }
 } // namespace hyfluid::project
 
-extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v12(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
+extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v13(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
     return hyfluid::plugin::export_plugin<hyfluid::project::Project>();
 }
