@@ -255,7 +255,7 @@ namespace hyfluid::project {
         dataset::scalar_real::Dataset dataset;
         std::vector<FrameSetRuntime> frame_sets;
         std::uint64_t pixel_bytes{};
-        std::uint64_t frame_count{};
+        std::uint64_t loaded_frame_count{};
         std::uint64_t timeline_frame_count{};
         double timeline_frame_rate{};
         double latest_time_seconds{};
@@ -319,7 +319,7 @@ namespace hyfluid::project {
                 if (runtime.frame_indices.at(grid_index) != std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("ScalarReal frame set '{}' contains duplicate view-time frames.", frame_set.name)};
                 runtime.frame_indices.at(grid_index) = frame_index;
                 state->pixel_bytes += static_cast<std::uint64_t>(frame.rgba.size());
-                ++state->frame_count;
+                ++state->loaded_frame_count;
             }
             for (const std::uint32_t frame_index : runtime.frame_indices)
                 if (frame_index == std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("ScalarReal frame set '{}' is missing view-time frames.", frame_set.name)};
@@ -386,12 +386,12 @@ namespace hyfluid::project {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
         if (!std::isfinite(frame.delta_seconds) || frame.delta_seconds < 0.0) throw std::runtime_error{"HyFluid project frame delta time is invalid."};
         if (!std::isfinite(frame.time_seconds) || frame.time_seconds < 0.0) throw std::runtime_error{"HyFluid project frame time is invalid."};
+        if (frame.frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project requested frame outside indexed timeline."};
+        const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
 
         plugin::Frame output;
         for (const FrameSetRuntime& runtime : this->state->frame_sets) {
             const dataset::scalar_real::FrameSet& frame_set = this->state->dataset.frame_sets.at(runtime.dataset_frame_set_index);
-            if (frame.frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project requested frame outside indexed timeline."};
-            const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
             for (const std::uint32_t view_index : runtime.visible_views) {
                 const std::uint32_t frame_index = runtime.frame_indices.at(view_index * runtime.time_count + time_index);
                 const dataset::scalar_real::Frame& scalar_frame = frame_set.frames.at(frame_index);
@@ -412,7 +412,7 @@ namespace hyfluid::project {
         controls.metric("frame_sets", "Frame Sets", joined_frame_sets(this->state->dataset_options.frame_sets)).section(section_dataset_id);
         controls.metric("frame_set_count", "Frame Set Count", static_cast<std::uint64_t>(this->state->dataset.frame_sets.size())).section(section_dataset_id);
         controls.metric("videos", "Videos", static_cast<std::uint64_t>(this->state->dataset.videos.size())).section(section_dataset_id);
-        controls.metric("frames", "Frames", this->state->frame_count).section(section_dataset_id);
+        controls.metric("frames", "Frames", this->state->loaded_frame_count).section(section_dataset_id);
         controls.metric("pixel_storage_mib", "Pixel Storage MiB", static_cast<double>(this->state->pixel_bytes) / 1048576.0).section(section_diagnostics_id);
         controls.metric("scene_scale", "Scene Scale", std::format("{:.6f}", this->state->dataset.scene_scale)).section(section_diagnostics_id);
         controls.metric("near_far", "Near/Far", std::format("{:.6f} / {:.6f}", this->state->dataset.near, this->state->dataset.far)).section(section_diagnostics_id);

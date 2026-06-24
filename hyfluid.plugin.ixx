@@ -108,7 +108,7 @@ export namespace hyfluid::plugin {
 
     struct TimelineDescriptor final {
         TimelineKind kind{TimelineKind::Static};
-        double frame_rate{24.0};
+        double frame_rate{};
         std::uint64_t frame_count{};
     };
 
@@ -605,17 +605,27 @@ export namespace hyfluid::plugin {
     }
 
     [[nodiscard]] inline SpectraSceneTimeline make_timeline_view(const TimelineDescriptor& timeline) {
-        std::uint32_t kind{};
         switch (timeline.kind) {
-        case TimelineKind::Static: kind = SPECTRA_SCENE_TIMELINE_STATIC; break;
-        case TimelineKind::Live: kind = SPECTRA_SCENE_TIMELINE_LIVE; break;
-        case TimelineKind::Indexed: kind = SPECTRA_SCENE_TIMELINE_INDEXED; break;
+        case TimelineKind::Static:
+            return SpectraSceneTimeline{
+                .kind = SPECTRA_SCENE_TIMELINE_STATIC,
+                .frame_rate = timeline.frame_rate,
+                .frame_count = timeline.frame_count,
+            };
+        case TimelineKind::Live:
+            return SpectraSceneTimeline{
+                .kind = SPECTRA_SCENE_TIMELINE_LIVE,
+                .frame_rate = timeline.frame_rate,
+                .frame_count = timeline.frame_count,
+            };
+        case TimelineKind::Indexed:
+            return SpectraSceneTimeline{
+                .kind = SPECTRA_SCENE_TIMELINE_INDEXED,
+                .frame_rate = timeline.frame_rate,
+                .frame_count = timeline.frame_count,
+            };
         }
-        return SpectraSceneTimeline{
-            .kind = kind,
-            .frame_rate = timeline.frame_rate,
-            .frame_count = timeline.frame_count,
-        };
+        throw std::runtime_error{"plugin timeline kind is invalid"};
     }
 
     [[nodiscard]] inline SpectraSceneDocumentView make_document_abi_view(SceneAbiStorage& cache) {
