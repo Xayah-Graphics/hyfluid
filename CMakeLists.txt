@@ -3,6 +3,7 @@ set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 project(HyFluid VERSION 1.2.0 LANGUAGES CXX CUDA)
 
 option(HYFLUID_BUILD_APP "Build the optional HyFluid executable" OFF)
+option(HYFLUID_BUILD_PROJECT_PLUGIN "Build the optional Spectra project plugin" OFF)
 
 # ============================================================================
 # C++ Configuration
@@ -91,7 +92,7 @@ set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 # ============================================================================
 # Optional Dataset Loading
 # ============================================================================
-if (HYFLUID_BUILD_APP)
+if (HYFLUID_BUILD_APP OR HYFLUID_BUILD_PROJECT_PLUGIN)
     set(HYFLUID_DATASET_GIT_TAG "f4a4ff6ccd7f1c4f805d4deb2b616c0741e0273e")
     set(HYFLUID_DATASET_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/dataset/${HYFLUID_DATASET_GIT_TAG}")
     download_if_needed(
@@ -207,6 +208,33 @@ if (HYFLUID_BUILD_APP)
         set_property(TARGET dataset-scalar-real PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
     endif ()
     set_property(TARGET dataset-scalar-real PROPERTY CXX_MODULE_STD ON)
+endif ()
+
+
+# ============================================================================
+# Optional Project Plugin
+# ============================================================================
+if (HYFLUID_BUILD_PROJECT_PLUGIN)
+    add_library(hyfluid_project_plugin SHARED)
+    target_sources(
+            hyfluid_project_plugin
+            PRIVATE
+            hyfluid.project.cpp
+            PRIVATE
+            FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            hyfluid.plugin.ixx
+            hyfluid.project.ixx
+    )
+    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-scalar-real)
+    if (WIN32)
+        add_custom_command(
+                TARGET hyfluid_project_plugin POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HYFLUID_FFMPEG_RUNTIME_FILES} $<TARGET_FILE_DIR:hyfluid_project_plugin>
+        )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set_property(TARGET hyfluid_project_plugin PROPERTY BUILD_RPATH "${HYFLUID_FFMPEG_LIB_DIR}")
+    endif ()
+    set_property(TARGET hyfluid_project_plugin PROPERTY CXX_MODULE_STD ON)
 endif ()
 
 
