@@ -48,8 +48,8 @@ namespace hyfluid::cuda {
         if (required_bytes > std::numeric_limits<std::size_t>::max() - frame_index_bytes) throw std::runtime_error{"dynamic dataset upload is too large."};
         required_bytes += frame_index_bytes;
 
-        auto free_bytes  = static_cast<std::size_t>(0u);
-        auto total_bytes = static_cast<std::size_t>(0u);
+        std::size_t free_bytes  = 0u;
+        std::size_t total_bytes = 0u;
         if (const cudaError_t status = cudaMemGetInfo(&free_bytes, &total_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemGetInfo failed: "} + cudaGetErrorString(status)};
         if (required_bytes > free_bytes) throw std::runtime_error{"dynamic dataset does not fit in available GPU memory."};
 

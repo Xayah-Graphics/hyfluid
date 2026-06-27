@@ -8,7 +8,6 @@ export namespace hyfluid::project {
     public:
         struct State;
 
-        Project();
         Project(const Project& other) = delete;
         Project(Project&& other) noexcept;
         Project& operator=(const Project& other) = delete;

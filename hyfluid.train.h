@@ -1,7 +1,6 @@
 #ifndef HYFLUID_TRAIN_H
 #define HYFLUID_TRAIN_H
 
-#include "hyfluid.train.config.h"
 #include <cstdint>
 #include <type_traits>
 

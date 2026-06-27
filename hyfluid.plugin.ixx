@@ -4,10 +4,10 @@ import std;
 
 export namespace hyfluid::plugin {
     enum class OptionKind : std::uint32_t {
-        Text,
-        DirectoryPath,
-        Float,
-        UnsignedInteger,
+        Text            = 0u,
+        DirectoryPath   = 1u,
+        Float           = 5u,
+        UnsignedInteger = 6u,
     };
 
     struct ControlSection final {
@@ -70,7 +70,7 @@ export namespace hyfluid::plugin {
 
     enum class CameraProjection : std::uint32_t {
         Perspective = 0u,
-        Pinhole = 1u,
+        Pinhole     = 1u,
     };
 
     struct CameraImage final {
@@ -101,8 +101,8 @@ export namespace hyfluid::plugin {
     };
 
     enum class TimelineKind : std::uint32_t {
-        Static = 0u,
-        Live = 1u,
+        Static  = 0u,
+        Live    = 1u,
         Indexed = 2u,
     };
 
@@ -121,6 +121,8 @@ export namespace hyfluid::plugin {
     struct Frame final {
         std::vector<Camera> cameras;
     };
+
+    inline constexpr std::uint32_t ControlMetricDisplayPrimary = 1u << 0u;
 
     struct ControlMetric final {
         std::string key;
@@ -151,7 +153,7 @@ export namespace hyfluid::plugin {
             }
 
             MetricHandle& display_primary() {
-                this->metric->display_flags |= 1u;
+                this->metric->display_flags |= ControlMetricDisplayPrimary;
                 return *this;
             }
 
@@ -271,10 +273,6 @@ export namespace hyfluid::plugin {
     constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_STATIC = 0u;
     constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_LIVE = 1u;
     constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_INDEXED = 2u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_TEXT = 0u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_DIRECTORY_PATH = 1u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_FLOAT = 5u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_UNSIGNED_INTEGER = 6u;
     constexpr std::uint32_t SPECTRA_SCENE_OPTION_PRESENTATION_DEFAULT = 0u;
 
     struct SpectraSceneOption {
@@ -375,6 +373,16 @@ export namespace hyfluid::plugin {
         const SpectraSceneHostServices* host_services{};
     };
 
+    struct SpectraSceneMaterialSpan {
+        const void* data{};
+        std::uint64_t count{};
+    };
+
+    struct SpectraSceneLightSpan {
+        const void* data{};
+        std::uint64_t count{};
+    };
+
     struct SpectraSceneCameraImage {
         const std::uint8_t* rgba8{};
         std::uint64_t rgba8_size{};
@@ -405,16 +413,6 @@ export namespace hyfluid::plugin {
 
     struct SpectraSceneCameraSpan {
         const SpectraSceneCamera* data{};
-        std::uint64_t count{};
-    };
-
-    struct SpectraSceneMaterialSpan {
-        const void* data{};
-        std::uint64_t count{};
-    };
-
-    struct SpectraSceneLightSpan {
-        const void* data{};
         std::uint64_t count{};
     };
 
@@ -484,16 +482,16 @@ export namespace hyfluid::plugin {
         SpectraSceneItems items{};
     };
 
-    typedef SpectraSceneResult (*SpectraSceneCreateFn)(const SpectraSceneOpenInfo* open_info, SpectraSceneInstance** instance);
-    typedef void (*SpectraSceneDestroyFn)(SpectraSceneInstance* instance);
-    typedef SpectraSceneResult (*SpectraSceneUpdateFn)(SpectraSceneInstance* instance, const SpectraSceneUpdateInfo* update_info);
-    typedef SpectraSceneResult (*SpectraSceneDocumentFn)(SpectraSceneInstance* instance, SpectraSceneDocumentView* document);
-    typedef SpectraSceneResult (*SpectraSceneFrameFn)(SpectraSceneInstance* instance, SpectraSceneFrameInfo frame, SpectraSceneFrameView* snapshot);
-    typedef SpectraSceneResult (*SpectraSceneRevisionFn)(SpectraSceneInstance* instance, std::uint64_t* revision);
-    typedef SpectraSceneResult (*SpectraSceneControlActionFn)(SpectraSceneInstance* instance, const char* action_id, SpectraSceneOptionSpan options);
-    typedef SpectraSceneResult (*SpectraSceneControlSettingUpdateFn)(SpectraSceneInstance* instance, const char* key, const char* value);
-    typedef SpectraSceneResult (*SpectraSceneControlStateFn)(SpectraSceneInstance* instance, SpectraSceneControlStateView* state);
-    typedef const char* (*SpectraSceneLastErrorFn)(SpectraSceneInstance* instance);
+    typedef SpectraSceneResult (*SpectraSceneCreateFn)(const SpectraSceneOpenInfo*, SpectraSceneInstance**);
+    typedef void (*SpectraSceneDestroyFn)(SpectraSceneInstance*);
+    typedef SpectraSceneResult (*SpectraSceneUpdateFn)(SpectraSceneInstance*, const SpectraSceneUpdateInfo*);
+    typedef SpectraSceneResult (*SpectraSceneDocumentFn)(SpectraSceneInstance*, SpectraSceneDocumentView*);
+    typedef SpectraSceneResult (*SpectraSceneFrameFn)(SpectraSceneInstance*, SpectraSceneFrameInfo, SpectraSceneFrameView*);
+    typedef SpectraSceneResult (*SpectraSceneRevisionFn)(SpectraSceneInstance*, std::uint64_t*);
+    typedef SpectraSceneResult (*SpectraSceneControlActionFn)(SpectraSceneInstance*, const char*, SpectraSceneOptionSpan);
+    typedef SpectraSceneResult (*SpectraSceneControlSettingUpdateFn)(SpectraSceneInstance*, const char*, const char*);
+    typedef SpectraSceneResult (*SpectraSceneControlStateFn)(SpectraSceneInstance*, SpectraSceneControlStateView*);
+    typedef const char* (*SpectraSceneLastErrorFn)(SpectraSceneInstance*);
 
     struct SpectraScenePlugin {
         std::uint32_t abi_version{};
@@ -517,14 +515,18 @@ export namespace hyfluid::plugin {
         SpectraSceneLastErrorFn last_error{};
     };
 
+    struct ItemAbiStorage final {
+        std::vector<SpectraSceneCamera> camera_views;
+    };
+
     struct SceneAbiStorage final {
         Document document;
-        std::vector<SpectraSceneCamera> camera_views;
+        ItemAbiStorage items;
     };
 
     struct FrameAbiStorage final {
         Frame frame;
-        std::vector<SpectraSceneCamera> camera_views;
+        ItemAbiStorage items;
     };
 
     struct ControlStateAbiStorage final {
@@ -548,19 +550,12 @@ export namespace hyfluid::plugin {
     };
 
     [[nodiscard]] inline std::uint32_t option_kind_abi(const OptionKind kind) {
-        switch (kind) {
-        case OptionKind::Text: return SPECTRA_SCENE_OPTION_TEXT;
-        case OptionKind::DirectoryPath: return SPECTRA_SCENE_OPTION_DIRECTORY_PATH;
-        case OptionKind::Float: return SPECTRA_SCENE_OPTION_FLOAT;
-        case OptionKind::UnsignedInteger: return SPECTRA_SCENE_OPTION_UNSIGNED_INTEGER;
-        }
-        throw std::runtime_error{"unknown HyFluid plugin option kind"};
+        return static_cast<std::uint32_t>(kind);
     }
 
-    inline void copy3(float* destination, const std::array<float, 3u>& source) {
-        destination[0] = source[0];
-        destination[1] = source[1];
-        destination[2] = source[2];
+    template <std::size_t Count>
+    inline void copy_array(float (&destination)[Count], const std::array<float, Count>& source) {
+        for (std::size_t index = 0u; index < Count; ++index) destination[index] = source[index];
     }
 
     [[nodiscard]] inline SpectraSceneCamera make_camera_view(const Camera& camera) {
@@ -578,75 +573,53 @@ export namespace hyfluid::plugin {
             .far_plane = camera.far_plane,
             .has_image = camera.image.has_value() ? 1u : 0u,
         };
-        copy3(view.position, camera.position);
-        copy3(view.right, camera.right);
-        copy3(view.down, camera.down);
-        copy3(view.forward, camera.forward);
+        copy_array(view.position, camera.position);
+        copy_array(view.right, camera.right);
+        copy_array(view.down, camera.down);
+        copy_array(view.forward, camera.forward);
         if (camera.image.has_value()) {
             const CameraImage& image = *camera.image;
-            view.image = SpectraSceneCameraImage{
-                .rgba8 = image.rgba8,
-                .rgba8_size = image.rgba8_size,
-                .revision = image.revision,
-                .width = image.width,
-                .height = image.height,
-            };
+            view.image = SpectraSceneCameraImage{.rgba8 = image.rgba8, .rgba8_size = image.rgba8_size, .revision = image.revision, .width = image.width, .height = image.height};
         }
         return view;
     }
 
-    [[nodiscard]] inline SpectraSceneItems make_items_view(std::vector<SpectraSceneCamera>& camera_views) {
+    inline void make_item_views(ItemAbiStorage& storage, const std::vector<Camera>& cameras) {
+        storage.camera_views.clear();
+        storage.camera_views.reserve(cameras.size());
+        for (const Camera& camera : cameras) storage.camera_views.push_back(make_camera_view(camera));
+    }
+
+    [[nodiscard]] inline SpectraSceneItems make_items_view(const ItemAbiStorage& storage) {
         return SpectraSceneItems{
-            .cameras = SpectraSceneCameraSpan{
-                .data = camera_views.empty() ? nullptr : camera_views.data(),
-                .count = static_cast<std::uint64_t>(camera_views.size()),
-            },
+            .cameras = SpectraSceneCameraSpan{.data = storage.camera_views.empty() ? nullptr : storage.camera_views.data(), .count = static_cast<std::uint64_t>(storage.camera_views.size())},
         };
     }
 
     [[nodiscard]] inline SpectraSceneTimeline make_timeline_view(const TimelineDescriptor& timeline) {
         switch (timeline.kind) {
-        case TimelineKind::Static:
-            return SpectraSceneTimeline{
-                .kind = SPECTRA_SCENE_TIMELINE_STATIC,
-                .frame_rate = timeline.frame_rate,
-                .frame_count = timeline.frame_count,
-            };
-        case TimelineKind::Live:
-            return SpectraSceneTimeline{
-                .kind = SPECTRA_SCENE_TIMELINE_LIVE,
-                .frame_rate = timeline.frame_rate,
-                .frame_count = timeline.frame_count,
-            };
-        case TimelineKind::Indexed:
-            return SpectraSceneTimeline{
-                .kind = SPECTRA_SCENE_TIMELINE_INDEXED,
-                .frame_rate = timeline.frame_rate,
-                .frame_count = timeline.frame_count,
-            };
+        case TimelineKind::Static: return SpectraSceneTimeline{.kind = SPECTRA_SCENE_TIMELINE_STATIC, .frame_rate = timeline.frame_rate, .frame_count = timeline.frame_count};
+        case TimelineKind::Live: return SpectraSceneTimeline{.kind = SPECTRA_SCENE_TIMELINE_LIVE, .frame_rate = timeline.frame_rate, .frame_count = timeline.frame_count};
+        case TimelineKind::Indexed: return SpectraSceneTimeline{.kind = SPECTRA_SCENE_TIMELINE_INDEXED, .frame_rate = timeline.frame_rate, .frame_count = timeline.frame_count};
         }
         throw std::runtime_error{"plugin timeline kind is invalid"};
     }
 
     [[nodiscard]] inline SpectraSceneDocumentView make_document_abi_view(SceneAbiStorage& cache) {
-        cache.camera_views.clear();
-        cache.camera_views.reserve(cache.document.cameras.size());
-        for (const Camera& camera : cache.document.cameras) cache.camera_views.push_back(make_camera_view(camera));
+        make_item_views(cache.items, cache.document.cameras);
         return SpectraSceneDocumentView{
             .struct_size = sizeof(SpectraSceneDocumentView),
             .timeline = make_timeline_view(cache.document.timeline),
             .active_camera_name = cache.document.active_camera_name.c_str(),
-            .items = make_items_view(cache.camera_views),
+            .items = make_items_view(cache.items),
         };
     }
 
     [[nodiscard]] inline SpectraSceneFrameView make_frame_abi_view(FrameAbiStorage& cache) {
-        cache.camera_views.clear();
-        cache.camera_views.reserve(cache.frame.cameras.size());
-        for (const Camera& camera : cache.frame.cameras) cache.camera_views.push_back(make_camera_view(camera));
+        make_item_views(cache.items, cache.frame.cameras);
         return SpectraSceneFrameView{
             .struct_size = sizeof(SpectraSceneFrameView),
-            .items = make_items_view(cache.camera_views),
+            .items = make_items_view(cache.items),
         };
     }
 
@@ -662,8 +635,7 @@ export namespace hyfluid::plugin {
                 .display_flags = metric.display_flags,
                 .has_color = metric.has_color ? 1u : 0u,
             };
-            copy3(view.color, std::array<float, 3u>{metric.color[0], metric.color[1], metric.color[2]});
-            view.color[3] = metric.color[3];
+            copy_array(view.color, metric.color);
             cache.metric_views.push_back(view);
         }
         return SpectraSceneControlStateView{
@@ -753,6 +725,7 @@ export namespace hyfluid::plugin {
             if (open_info == nullptr) throw std::runtime_error{"HyFluid plugin create open info pointer is null."};
             if (instance == nullptr) throw std::runtime_error{"HyFluid plugin create instance output pointer is null."};
             if (open_info->struct_size != sizeof(SpectraSceneOpenInfo)) throw std::runtime_error{"HyFluid plugin open info ABI size mismatch."};
+            *instance = nullptr;
             PluginExportState& state = PluginExportState::current();
             state.global_error.clear();
             auto plugin_instance = std::make_unique<PluginInstance>();
@@ -812,11 +785,7 @@ export namespace hyfluid::plugin {
             PluginInstance& plugin_instance = checked_instance(instance, "HyFluid plugin frame");
             if (snapshot == nullptr) throw std::runtime_error{"HyFluid plugin frame output pointer is null."};
             plugin_instance.last_error.clear();
-            plugin_instance.frame_abi.frame = plugin_instance.definition->frame(plugin_instance.project, FrameInfo{
-                .delta_seconds = frame.delta_seconds,
-                .time_seconds = frame.time_seconds,
-                .frame_index = frame.frame_index,
-            });
+            plugin_instance.frame_abi.frame = plugin_instance.definition->frame(plugin_instance.project, FrameInfo{.delta_seconds = frame.delta_seconds, .time_seconds = frame.time_seconds, .frame_index = frame.frame_index});
             *snapshot = make_frame_abi_view(plugin_instance.frame_abi);
             return SPECTRA_SCENE_RESULT_OK;
         } catch (const std::exception& error) {
@@ -839,12 +808,12 @@ export namespace hyfluid::plugin {
     }
 
     [[nodiscard]] inline SpectraSceneResult scene_control_action(SpectraSceneInstance* instance, const char*, SpectraSceneOptionSpan) noexcept {
-        if (instance != nullptr) static_cast<PluginInstance*>(instance)->last_error = "HyFluid dataset visualization plugin does not expose control actions.";
+        if (instance != nullptr) static_cast<PluginInstance*>(instance)->last_error = "HyFluid project plugin does not expose control actions.";
         return SPECTRA_SCENE_RESULT_ERROR;
     }
 
     [[nodiscard]] inline SpectraSceneResult scene_control_setting_update(SpectraSceneInstance* instance, const char*, const char*) noexcept {
-        if (instance != nullptr) static_cast<PluginInstance*>(instance)->last_error = "HyFluid dataset visualization plugin does not expose control settings.";
+        if (instance != nullptr) static_cast<PluginInstance*>(instance)->last_error = "HyFluid project plugin does not expose control settings.";
         return SPECTRA_SCENE_RESULT_ERROR;
     }
 

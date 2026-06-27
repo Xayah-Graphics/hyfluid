@@ -10,6 +10,7 @@ module hyfluid.project;
 
 import dataset.scalar_real;
 import hyfluid.plugin;
+import hyfluid.train;
 import std;
 
 namespace hyfluid::project {
@@ -166,7 +167,6 @@ namespace hyfluid::project {
                 .forward = scalar_real_normalized_to_spectra(forward),
             };
 
-            // Newton iteration for the polar factor of ScalarReal's non-uniformly scaled camera matrix.
             for (std::uint32_t iteration = 0u; iteration < 8u; ++iteration) {
                 const float determinant = dot(cross(basis.right, basis.down), basis.forward);
                 if (!std::isfinite(determinant) || determinant <= 1.0e-8f) throw std::runtime_error{std::format("{} ScalarReal camera transform must become right-handed after SpectraYUp mapping.", context)};
@@ -248,11 +248,12 @@ namespace hyfluid::project {
                 },
             };
         }
-    } // namespace
+    }
 
     struct Project::State final {
         DatasetOptions dataset_options;
         dataset::scalar_real::Dataset dataset;
+        std::unique_ptr<train::HyFluid> trainer;
         std::vector<FrameSetRuntime> frame_sets;
         std::uint64_t pixel_bytes{};
         std::uint64_t loaded_frame_count{};
@@ -262,7 +263,6 @@ namespace hyfluid::project {
         bool host_timeline_playing{true};
     };
 
-    Project::Project() = default;
     Project::Project(std::unique_ptr<State> state) : state(std::move(state)) {}
     Project::Project(Project&& other) noexcept = default;
     Project& Project::operator=(Project&& other) noexcept = default;
@@ -300,6 +300,7 @@ namespace hyfluid::project {
         auto state = std::make_unique<State>();
         state->dataset_options = std::move(options);
         state->dataset = std::move(*loaded_dataset);
+        state->trainer = std::make_unique<train::HyFluid>(state->dataset);
 
         state->frame_sets.reserve(state->dataset.frame_sets.size());
         for (std::uint32_t frame_set_index = 0u; frame_set_index < state->dataset.frame_sets.size(); ++frame_set_index) {

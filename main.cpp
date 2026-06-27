@@ -3,15 +3,10 @@ import xayah.util.xcli;
 import dataset.scalar_real;
 import hyfluid.train;
 
-#ifndef HYFLUID_TRAIN_PROFILE_NAME
-#error "HYFLUID_TRAIN_PROFILE_NAME must be provided by the app target."
-#endif
-
 int main(const int argc, const char* const* const argv) {
     const std::span arguments{argv, static_cast<std::size_t>(argc)};
-    constexpr std::string_view ansi_reset                = "\x1b[0m";
-    constexpr std::string_view ansi_red                  = "\x1b[31m";
-    constexpr std::string_view active_train_profile_name = HYFLUID_TRAIN_PROFILE_NAME;
+    constexpr std::string_view ansi_reset = "\x1b[0m";
+    constexpr std::string_view ansi_red   = "\x1b[31m";
 
     std::filesystem::path dataset_path;
     std::vector<std::string> requested_frame_sets;
@@ -34,7 +29,8 @@ int main(const int argc, const char* const* const argv) {
                                          .default_text = "train",
                                      },
                                      requested_frame_sets)
-                                 | xayah::util::example("data/ScalarReal") | xayah::util::example("data/ScalarReal --frame-set train --frame-set test");
+                                 | xayah::util::example("data/ScalarReal")
+                                 | xayah::util::example("data/ScalarReal --frame-set train --frame-set test");
 
     const std::string usage = command.help(arguments);
     const auto cli_result   = command.parse(arguments);
@@ -73,27 +69,23 @@ int main(const int argc, const char* const* const argv) {
     }
 
     try {
-        hyfluid::train::HyFluid hyfluid{*loaded_dataset};
-
-        std::uint64_t total_frame_count = 0u;
+        const dataset::scalar_real::Dataset& dataset = *loaded_dataset;
+        const hyfluid::train::HyFluid hyfluid{dataset};
         std::uint64_t total_pixel_bytes = 0u;
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
-            total_frame_count += frame_set.frame_count;
-            total_pixel_bytes += frame_set.pixel_bytes;
-        }
+        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) total_pixel_bytes += frame_set.pixel_bytes;
 
         std::println("HyFluid ScalarReal dataset loaded.");
-        std::println("profile: {}", active_train_profile_name);
         std::println("path: {}", dataset_path.string());
         std::println("scene_scale: {:.6f}", hyfluid.host.scene_scale);
         std::println("near/far: {:.6f} / {:.6f}", hyfluid.host.near, hyfluid.host.far);
         std::println("frame sets: {}", hyfluid.host.frame_sets.size());
         std::println("videos: {}", hyfluid.host.videos.size());
-        std::println("frames: {}", total_frame_count);
-        std::println("device pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
+        std::println("frames: {}", hyfluid.host.frames.size());
+        std::println("pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
+        std::println("train dataset upload: ok");
 
         for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
-            std::println("frame_set '{}': {} frames, {} views x {} times, {}x{}, {:.3f} MiB pixels", frame_set.name, frame_set.frame_count, frame_set.view_count, frame_set.time_count, frame_set.width, frame_set.height, static_cast<double>(frame_set.pixel_bytes) / 1048576.0);
+            std::println("frame_set '{}': {} frames, {} views x {} times, {:.3f} MiB pixels", frame_set.name, frame_set.frame_count, frame_set.view_count, frame_set.time_count, static_cast<double>(frame_set.pixel_bytes) / 1048576.0);
         }
 
         return 0;

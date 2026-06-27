@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
-project(HyFluid VERSION 1.2.0 LANGUAGES CXX CUDA)
+project(HyFluid VERSION 1.0.0 LANGUAGES CXX CUDA)
 
 option(HYFLUID_BUILD_APP "Build the optional HyFluid executable" OFF)
 option(HYFLUID_BUILD_PROJECT_PLUGIN "Build the optional Spectra project plugin" OFF)
@@ -38,13 +38,6 @@ endif ()
 # ============================================================================
 find_package(CUDAToolkit 13.2 REQUIRED)
 
-set(HYFLUID_TRAIN_PROFILE "baseline" CACHE STRING "Compile-time HyFluid train profile")
-set_property(CACHE HYFLUID_TRAIN_PROFILE PROPERTY STRINGS baseline)
-if (NOT HYFLUID_TRAIN_PROFILE STREQUAL "baseline")
-    message(FATAL_ERROR "Unknown HYFLUID_TRAIN_PROFILE='${HYFLUID_TRAIN_PROFILE}'. Supported profiles: baseline")
-endif ()
-set(HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX "BASELINE")
-
 function(download_if_needed url out_path)
     if (EXISTS "${out_path}")
         message(STATUS "Using cached file: ${out_path}")
@@ -78,14 +71,12 @@ target_sources(
         PRIVATE
         hyfluid.train.cpp
         hyfluid.train.cu
-        hyfluid.train.config.h
         hyfluid.train.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         hyfluid.train.ixx
 )
-target_compile_definitions(libhyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_${HYFLUID_TRAIN_PROFILE_DEFINITION_SUFFIX}=1")
-target_link_libraries(libhyfluid PUBLIC CUDA::cudart)
+target_link_libraries(libhyfluid PRIVATE CUDA::cudart)
 set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 
 
@@ -225,7 +216,7 @@ if (HYFLUID_BUILD_PROJECT_PLUGIN)
             hyfluid.plugin.ixx
             hyfluid.project.ixx
     )
-    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-scalar-real)
+    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-scalar-real libhyfluid)
     if (WIN32)
         add_custom_command(
                 TARGET hyfluid_project_plugin POST_BUILD
@@ -265,7 +256,6 @@ if (HYFLUID_BUILD_APP)
     set_property(TARGET xayah-util-xcli PROPERTY CXX_MODULE_STD ON)
 
     add_executable(hyfluid main.cpp)
-    target_compile_definitions(hyfluid PRIVATE "HYFLUID_TRAIN_PROFILE_NAME=\"${HYFLUID_TRAIN_PROFILE}\"")
     target_link_libraries(hyfluid PRIVATE xayah-util-xcli dataset-scalar-real libhyfluid)
     if (WIN32)
         add_custom_command(
