@@ -72,9 +72,14 @@ target_sources(
         hyfluid.train.cpp
         hyfluid.train.cu
         hyfluid.train.h
+        hyfluid.train.config.h
+        hyfluid.inspector.cpp
+        hyfluid.inspector.cu
+        hyfluid.inspector.h
         PUBLIC
         FILE_SET cxx_modules TYPE CXX_MODULES FILES
         hyfluid.train.ixx
+        hyfluid.inspector.ixx
 )
 target_link_libraries(libhyfluid PRIVATE CUDA::cudart)
 set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
@@ -216,7 +221,7 @@ if (HYFLUID_BUILD_PROJECT_PLUGIN)
             hyfluid.plugin.ixx
             hyfluid.project.ixx
     )
-    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-scalar-real libhyfluid)
+    target_link_libraries(hyfluid_project_plugin PRIVATE dataset-scalar-real libhyfluid CUDA::cudart)
     if (WIN32)
         add_custom_command(
                 TARGET hyfluid_project_plugin POST_BUILD

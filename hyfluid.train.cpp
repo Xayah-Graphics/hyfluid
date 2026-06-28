@@ -1,5 +1,6 @@
 module;
 #include "hyfluid.train.h"
+#include "hyfluid.train.config.h"
 module hyfluid.train;
 import std;
 
@@ -192,14 +193,22 @@ namespace hyfluid::train {
                 }
             }
 
+            cuda::allocate_sampler_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
+            cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_occupied_count);
             this->host.current_step = 0u;
+            this->host.rays_per_batch = config::initial_rays_per_batch;
+            this->host.measured_sample_count = 0u;
+            this->host.occupancy_grid_occupied_cells = config::nerf_grid_cells;
+            this->host.occupancy_grid_revision = 1u;
         } catch (...) {
+            cuda::free_device_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
             for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
             throw;
         }
     }
 
     HyFluid::~HyFluid() noexcept {
+        cuda::free_device_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
         for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
     }
 
@@ -207,7 +216,41 @@ namespace hyfluid::train {
         try {
             if (request.frame_set.empty()) throw std::runtime_error{"optimization frame set must not be empty."};
             if (request.iterations < 1) throw std::runtime_error{"optimization iterations must be positive."};
-            throw std::runtime_error{"HyFluid optimization is not implemented yet."};
+            const HostFrameSet* host_frame_set = nullptr;
+            const DeviceFrameSet* device_frame_set = nullptr;
+            for (std::size_t frame_set_index = 0uz; frame_set_index < this->host.frame_sets.size(); ++frame_set_index) {
+                if (this->host.frame_sets[frame_set_index].name == request.frame_set) {
+                    host_frame_set = std::addressof(this->host.frame_sets[frame_set_index]);
+                    device_frame_set = std::addressof(this->device.frame_sets[frame_set_index]);
+                    break;
+                }
+            }
+            if (host_frame_set == nullptr || device_frame_set == nullptr) throw std::runtime_error{std::format("optimization frame set '{}' is not loaded.", request.frame_set)};
+
+            const auto optimize_start = std::chrono::steady_clock::now();
+            std::uint32_t ray_count = 0u;
+            std::uint32_t sample_count = 0u;
+            for (std::int32_t i = 0; i < request.iterations; ++i) {
+                cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->times, device_frame_set->frame_indices, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, this->host.current_step, this->host.rays_per_batch, config::max_samples, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
+                cuda::read_counter(this->device.ray_counter, ray_count);
+                cuda::read_counter(this->device.sample_counter, sample_count);
+                if (sample_count > config::max_samples) sample_count = config::max_samples;
+                if (ray_count == 0u || sample_count == 0u) throw std::runtime_error{"HyFluid sampler produced an empty batch."};
+                this->host.measured_sample_count = sample_count;
+                ++this->host.current_step;
+            }
+            cuda::read_counter(this->device.occupancy_grid_occupied_count, this->host.occupancy_grid_occupied_cells);
+            return OptimizationStats{
+                .step = this->host.current_step,
+                .rays_per_batch = this->host.rays_per_batch,
+                .ray_count = ray_count,
+                .sample_count = sample_count,
+                .occupancy_grid_occupied_cells = this->host.occupancy_grid_occupied_cells,
+                .loss = 0.0f,
+                .elapsed_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - optimize_start).count(),
+                .sample_efficiency_ratio = static_cast<float>(sample_count) / static_cast<float>(config::max_samples),
+                .occupancy_grid_ratio = static_cast<float>(this->host.occupancy_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
+            };
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
         }

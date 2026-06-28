@@ -19,9 +19,15 @@ export namespace hyfluid::project {
 
         void update(const plugin::UpdateInfo& update);
         [[nodiscard]] std::uint64_t revision() const;
-        [[nodiscard]] plugin::Document document() const;
-        [[nodiscard]] plugin::Frame frame(const plugin::FrameInfo& frame) const;
+        void write_document(plugin::SceneBuilder& scene) const;
+        void write_frame(plugin::SceneBuilder& scene, plugin::FrameInfo frame);
         void write_controls(plugin::ControlBuilder& controls) const;
+
+        void set_show_sampler(bool value);
+        void set_show_sampler_points(bool value);
+        void set_show_sampler_rays(bool value);
+        void set_sampler_point_radius(float value);
+        void set_sampler_ray_width(float value);
 
     private:
         explicit Project(std::unique_ptr<State> state);

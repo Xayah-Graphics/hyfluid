@@ -121,9 +121,15 @@ namespace hyfluid::train {
     };
 
     export struct OptimizationStats final {
-        std::uint32_t step = 0u;
-        float loss         = 0.0f;
-        float elapsed_ms   = 0.0f;
+        std::uint32_t step                          = 0u;
+        std::uint32_t rays_per_batch                = 0u;
+        std::uint32_t ray_count                     = 0u;
+        std::uint32_t sample_count                  = 0u;
+        std::uint32_t occupancy_grid_occupied_cells = 0u;
+        float loss                                  = 0.0f;
+        float elapsed_ms                            = 0.0f;
+        float sample_efficiency_ratio               = 0.0f;
+        float occupancy_grid_ratio                  = 0.0f;
     };
 
     export struct EvaluationStats final {
@@ -275,8 +281,12 @@ namespace hyfluid::train {
             float phi                            = 0.0f;
             char rotation_axis                   = 'Y';
 
-            // Mutated by optimize(): training step and latest counters.
-            std::uint32_t current_step = 0u;
+            // Mutated by optimize(): sampler step and latest counters.
+            std::uint32_t current_step                    = 0u;
+            std::uint32_t rays_per_batch                  = 0u;
+            std::uint32_t measured_sample_count           = 0u;
+            std::uint32_t occupancy_grid_occupied_cells   = 0u;
+            std::uint64_t occupancy_grid_revision         = 0u;
         } host;
 
         struct DeviceFrameSet final {
@@ -292,6 +302,16 @@ namespace hyfluid::train {
         struct DeviceData {
             // Dataset.
             std::vector<DeviceFrameSet> frame_sets = {};
+
+            // Sampler.
+            std::uint8_t* occupancy                    = nullptr;
+            float* sample_coords                       = nullptr;
+            float* rays                                = nullptr;
+            std::uint32_t* ray_indices                 = nullptr;
+            std::uint32_t* numsteps                    = nullptr;
+            std::uint32_t* ray_counter                 = nullptr;
+            std::uint32_t* sample_counter              = nullptr;
+            std::uint32_t* occupancy_grid_occupied_count = nullptr;
         } device;
     };
 } // namespace hyfluid::train
