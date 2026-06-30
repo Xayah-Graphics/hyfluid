@@ -66,6 +66,10 @@ download_if_needed(
         "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
         "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image_write.h"
 )
+download_if_needed(
+        "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/vendor/json/json.hpp"
+)
 
 # ============================================================================
 # Core Library
@@ -105,11 +109,6 @@ if (HYFLUID_BUILD_APP OR HYFLUID_BUILD_PROJECT_PLUGIN)
             "https://raw.githubusercontent.com/Xayah-Graphics/dataset/${HYFLUID_DATASET_GIT_TAG}/scalar_real.cpp"
             "${HYFLUID_DATASET_VENDOR_DIR}/scalar_real.cpp"
     )
-    download_if_needed(
-            "https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp"
-            "${CMAKE_CURRENT_BINARY_DIR}/vendor/json/json.hpp"
-    )
-
     set(HYFLUID_FFMPEG_RELEASE_TAG "autobuild-2026-06-17-14-17")
     if (WIN32)
         set(HYFLUID_FFMPEG_NAME "ffmpeg-n8.1.2-win64-lgpl-shared-8.1")

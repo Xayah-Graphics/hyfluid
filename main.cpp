@@ -15,6 +15,8 @@ int main(const int argc, const char* const* const argv) {
     std::int32_t log_every = 100;
     std::filesystem::path training_log_path;
     std::filesystem::path evaluation_output_path;
+    std::optional<std::filesystem::path> load_weights_path;
+    std::optional<std::filesystem::path> save_weights_path;
     bool include_test_in_training = false;
 
     xayah::util::Command command = xayah::util::Command{"ScalarReal dynamic dataset loader for HyFluid."}
@@ -69,6 +71,22 @@ int main(const int argc, const char* const* const argv) {
                                      evaluation_output_path)
                                  | xayah::util::option(
                                      xayah::util::OptionSpec{
+                                         .long_name    = "load-weights",
+                                         .value_name   = "path",
+                                         .description  = "Load HyFluid density safetensors weights before optimization or evaluation.",
+                                         .default_text = "none",
+                                     },
+                                     load_weights_path, xayah::util::PathRule{.requirement = xayah::util::PathRequirement::existing_file})
+                                 | xayah::util::option(
+                                     xayah::util::OptionSpec{
+                                         .long_name    = "save-weights",
+                                         .value_name   = "path",
+                                         .description  = "Save final HyFluid density safetensors weights after optimization and evaluation.",
+                                         .default_text = "none",
+                                     },
+                                     save_weights_path, xayah::util::PathRule{.requirement = xayah::util::PathRequirement::existing_parent_directory})
+                                 | xayah::util::option(
+                                     xayah::util::OptionSpec{
                                          .long_name    = "include-test-in-training",
                                          .description  = "Include the ScalarReal test frame set in density optimization before test evaluation.",
                                          .show_default = false,
@@ -77,6 +95,8 @@ int main(const int argc, const char* const* const argv) {
                                  | xayah::util::example("data/ScalarReal")
                                  | xayah::util::example("data/ScalarReal --frame-set train --frame-set test")
                                  | xayah::util::example("data/ScalarReal --frame-set train --optimize 1")
+                                 | xayah::util::example("data/ScalarReal --frame-set train --optimize 1 --save-weights logs/hyfluid-density.safetensors")
+                                 | xayah::util::example("data/ScalarReal --frame-set train --load-weights logs/hyfluid-density.safetensors --optimize 1")
                                  | xayah::util::example("data/ScalarReal --optimize 10000 --log-every 100 --training-log logs/hyfluid-density.jsonl --evaluate-output logs/hyfluid-density-test")
                                  | xayah::util::example("data/ScalarReal --optimize 10000 --include-test-in-training --training-log logs/hyfluid-density-train-plus-test.jsonl --evaluate-output logs/hyfluid-density-train-plus-test");
 
@@ -155,6 +175,14 @@ int main(const int argc, const char* const* const argv) {
         const dataset::scalar_real::Dataset& dataset = *loaded_dataset;
         hyfluid::train::HyFluid hyfluid{dataset};
         hyfluid::inspector::Inspector inspector{hyfluid};
+        if (load_weights_path.has_value()) {
+            const std::expected<void, std::string> loaded_weights = hyfluid.load_weights(*load_weights_path);
+            if (!loaded_weights) {
+                std::println("{}error:{} {}", ansi_red, ansi_reset, loaded_weights.error());
+                return 1;
+            }
+            std::println("weights loaded: {}", load_weights_path->string());
+        }
         const hyfluid::inspector::TrainingDomainView training_domain = inspector.training_domain_view();
         std::uint64_t total_pixel_bytes = 0u;
         for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) total_pixel_bytes += frame_set.pixel_bytes;
@@ -235,8 +263,8 @@ int main(const int argc, const char* const* const argv) {
                 std::uint64_t distributed_weight = 0u;
                 for (std::size_t frame_set_index = 0uz; frame_set_index < optimize_frame_sets.size(); ++frame_set_index) {
                     const std::uint64_t next_distributed_weight = distributed_weight + optimize_frame_set_weights[frame_set_index];
-                    const std::int32_t previous_iteration_boundary = static_cast<std::int32_t>(static_cast<std::uint64_t>(chunk_iterations) * distributed_weight / optimize_frame_set_weight_sum);
-                    const std::int32_t next_iteration_boundary = static_cast<std::int32_t>(static_cast<std::uint64_t>(chunk_iterations) * next_distributed_weight / optimize_frame_set_weight_sum);
+                    const auto previous_iteration_boundary = static_cast<std::int32_t>(static_cast<std::uint64_t>(chunk_iterations) * distributed_weight / optimize_frame_set_weight_sum);
+                    const auto next_iteration_boundary = static_cast<std::int32_t>(static_cast<std::uint64_t>(chunk_iterations) * next_distributed_weight / optimize_frame_set_weight_sum);
                     const std::int32_t frame_set_iterations = next_iteration_boundary - previous_iteration_boundary;
                     distributed_weight = next_distributed_weight;
                     if (frame_set_iterations == 0) continue;
@@ -273,7 +301,7 @@ int main(const int argc, const char* const* const argv) {
                 }
                 double recent_psnr_sum = 0.0;
                 for (const std::pair<std::int32_t, float>& value : recent_psnr) recent_psnr_sum += static_cast<double>(value.first) * static_cast<double>(value.second);
-                const float recent_psnr_mean = static_cast<float>(recent_psnr_sum / static_cast<double>(recent_psnr_steps));
+                const auto recent_psnr_mean = static_cast<float>(recent_psnr_sum / static_cast<double>(recent_psnr_steps));
 
                 std::println("density optimize: frame_set={} step={} loss={:.6g} psnr={:.3f} recent_psnr={:.3f} rays={}/{} samples={}/{} sample_eff={:.2f}% coord_min=[{:.4f},{:.4f},{:.4f}] coord_max=[{:.4f},{:.4f},{:.4f}] time=[{:.4f},{:.4f}] dt_metric=[{:.8f},{:.8f},{:.8f}] metric_per_field_unit=[{:.6f},{:.6f},{:.6f}] global_rgb=[param {:.6g}, color {:.6g}, grad {:.6g}] occupancy_cells={} occupancy_grid={:.2f}% elapsed={:.3f}ms",
                              optimize_frame_set_label,
@@ -368,6 +396,14 @@ int main(const int argc, const char* const* const argv) {
                              evaluation->output_dir.string(),
                              evaluation->elapsed_ms);
             }
+        }
+        if (save_weights_path.has_value()) {
+            const std::expected<void, std::string> saved_weights = hyfluid.export_weights(*save_weights_path);
+            if (!saved_weights) {
+                std::println("{}error:{} {}", ansi_red, ansi_reset, saved_weights.error());
+                return 1;
+            }
+            std::println("weights saved: {}", save_weights_path->string());
         }
 
         return 0;

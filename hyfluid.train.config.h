@@ -2,7 +2,6 @@
 #define HYFLUID_TRAIN_CONFIG_H
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 
 namespace hyfluid::train::config {
@@ -10,7 +9,7 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t hash4_features_per_level = 2u;
     inline constexpr std::uint32_t hash4_output_width       = hash4_level_count * hash4_features_per_level;
     inline constexpr std::uint32_t hash4_max_entries        = 1u << 19u;
-    inline constexpr std::array<std::uint32_t, hash4_level_count> hash4_resolutions = {16u, 21u, 26u, 32u, 41u, 51u, 65u, 81u, 102u, 129u, 162u, 204u, 257u, 323u, 407u, 512u};
+    inline constexpr std::array hash4_resolutions = {16u, 21u, 26u, 32u, 41u, 51u, 65u, 81u, 102u, 129u, 162u, 204u, 257u, 323u, 407u, 512u};
 
     inline constexpr std::uint32_t mlp_width            = 64u;
     inline constexpr std::uint32_t mlp_input_width      = hash4_output_width;
@@ -36,8 +35,8 @@ namespace hyfluid::train::config {
     inline constexpr float transmittance_epsilon             = 1.0e-4f;
     inline constexpr bool snap_to_pixel_centers              = true;
 
-    inline constexpr std::array<float, 3u> scalar_real_active_sim_min = {0.15f, 0.0f, 0.15f};
-    inline constexpr std::array<float, 3u> scalar_real_active_sim_max = {0.85f, 1.0f, 0.85f};
+    inline constexpr std::array scalar_real_active_sim_min = {0.15f, 0.0f, 0.15f};
+    inline constexpr std::array scalar_real_active_sim_max = {0.85f, 1.0f, 0.85f};
 
     inline constexpr float optimizer_learning_rate = 5.0e-4f;
     inline constexpr float optimizer_beta1         = 0.9f;

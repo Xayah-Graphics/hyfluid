@@ -1376,7 +1376,7 @@ namespace hyfluid::plugin {
             if (options.count > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) throw std::runtime_error(std::format("{} count is too large", context));
             std::vector<Option> converted{};
             converted.reserve(static_cast<std::size_t>(options.count));
-            const std::span<const SpectraSceneOption> option_span{options.data, static_cast<std::size_t>(options.count)};
+            const std::span option_span{options.data, static_cast<std::size_t>(options.count)};
             for (const SpectraSceneOption& option : option_span) {
                 converted.push_back(Option{
                     .key   = string_from_abi(option.key, std::format("{} key", context), false),

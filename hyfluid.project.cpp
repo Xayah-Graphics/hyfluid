@@ -351,8 +351,8 @@ namespace hyfluid::project {
             cudaDeviceProp device_properties{};
             if (const cudaError_t status = cudaGetDeviceProperties(&device_properties, cuda_device); status != cudaSuccess) throw std::runtime_error{std::string{"cudaGetDeviceProperties failed: "} + cudaGetErrorString(status)};
 
-            const bool has_vulkan_uuid = has_nonzero_bytes(std::span<const std::uint8_t>{identity.device_uuid.data(), identity.device_uuid.size()});
-            const bool has_vulkan_luid = has_nonzero_bytes(std::span<const std::uint8_t>{identity.device_luid.data(), identity.device_luid.size()});
+            const bool has_vulkan_uuid = has_nonzero_bytes(std::span{identity.device_uuid.data(), identity.device_uuid.size()});
+            const bool has_vulkan_luid = has_nonzero_bytes(std::span{identity.device_luid.data(), identity.device_luid.size()});
             if (!has_vulkan_uuid && !has_vulkan_luid) throw std::runtime_error{"Spectra GPU resource device identity did not include UUID or LUID."};
             if (has_vulkan_uuid) {
                 const std::uint8_t* const cuda_uuid = reinterpret_cast<const std::uint8_t*>(device_properties.uuid.bytes);
@@ -517,14 +517,14 @@ namespace hyfluid::project {
             const std::array<float, 3u> minimum = field_to_scene_point(field_min);
             const std::array<float, 3u> maximum = field_to_scene_point(field_max);
             const std::array corners = {
-                std::array<float, 3u>{minimum[0u], minimum[1u], minimum[2u]},
-                std::array<float, 3u>{maximum[0u], minimum[1u], minimum[2u]},
-                std::array<float, 3u>{maximum[0u], maximum[1u], minimum[2u]},
-                std::array<float, 3u>{minimum[0u], maximum[1u], minimum[2u]},
-                std::array<float, 3u>{minimum[0u], minimum[1u], maximum[2u]},
-                std::array<float, 3u>{maximum[0u], minimum[1u], maximum[2u]},
-                std::array<float, 3u>{maximum[0u], maximum[1u], maximum[2u]},
-                std::array<float, 3u>{minimum[0u], maximum[1u], maximum[2u]},
+                std::array{minimum[0u], minimum[1u], minimum[2u]},
+                std::array{maximum[0u], minimum[1u], minimum[2u]},
+                std::array{maximum[0u], maximum[1u], minimum[2u]},
+                std::array{minimum[0u], maximum[1u], minimum[2u]},
+                std::array{minimum[0u], minimum[1u], maximum[2u]},
+                std::array{maximum[0u], minimum[1u], maximum[2u]},
+                std::array{maximum[0u], maximum[1u], maximum[2u]},
+                std::array{minimum[0u], maximum[1u], maximum[2u]},
             };
             return plugin::ViewportSegmentSet{
                 .name = std::move(name),
@@ -648,7 +648,7 @@ namespace hyfluid::project {
             if (density_values == nullptr) throw std::runtime_error{"HyFluid density volume external buffer was not mapped."};
 
             const inspector::Inspector inspector{*state.trainer};
-            const std::array<std::uint32_t, 3u> dimensions{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension};
+            const std::array dimensions{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension};
             const std::expected<inspector::DensitySliceSampleStats, std::string> stats = inspector.sample_density_slice(inspector::DensitySliceSampleRequest{
                 .dimensions = dimensions,
                 .time_count = static_cast<std::uint32_t>(state.timeline_frame_count),

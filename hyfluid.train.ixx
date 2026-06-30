@@ -196,7 +196,7 @@ namespace hyfluid::train {
                 const std::vector<FrameView>& frame_views = frame_views_by_set.at(frame_set_index);
                 frame_set_views.push_back(FrameSetView{
                     .name = frame_set_names.at(frame_set_index),
-                    .frames = std::span<const FrameView>{frame_views.data(), frame_views.size()},
+                    .frames = std::span{frame_views.data(), frame_views.size()},
                     .view_count = static_cast<std::uint32_t>(frame_set.view_count),
                     .time_count = static_cast<std::uint32_t>(frame_set.time_count),
                 });
@@ -224,10 +224,10 @@ namespace hyfluid::train {
         HyFluid(HyFluid&&) noexcept = delete;
         HyFluid& operator=(HyFluid&&) noexcept = delete;
 
-        std::expected<OptimizationStats, std::string> optimize(OptimizationRequest request);
-        std::expected<EvaluationStats, std::string> evaluate(EvaluationRequest request) const;
+        std::expected<OptimizationStats, std::string> optimize(const OptimizationRequest& request);
+        std::expected<EvaluationStats, std::string> evaluate(const EvaluationRequest& request) const;
         std::expected<void, std::string> export_weights(const std::filesystem::path& path) const;
-        std::expected<void, std::string> load_weights(const std::filesystem::path& path);
+        std::expected<void, std::string> load_weights(const std::filesystem::path& path) const;
 
         void initialize(const DatasetView& dataset);
 

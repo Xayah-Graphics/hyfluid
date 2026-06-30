@@ -2,7 +2,6 @@
 #define HYFLUID_TRAIN_H
 
 #include "hyfluid.train.config.h"
-#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -48,6 +47,8 @@ namespace hyfluid::cuda {
     // Trainable parameters and optimizer.
     void allocate_trainable_parameter_buffers(float*& out_params_full_precision, std::uint16_t*& out_params, float*& out_param_gradients);
     void initialize_trainable_parameters(float* params_full_precision, std::uint16_t* params);
+    void download_trainable_parameters(const float* params_full_precision, float* out_params_full_precision);
+    void upload_trainable_parameters(const float* params_full_precision, float* out_params_full_precision, std::uint16_t* out_params, float* out_param_gradients, float* optimizer_first_moments, float* optimizer_second_moments, std::uint32_t* optimizer_param_steps);
     void allocate_optimizer_buffers(float*& out_first_moments, float*& out_second_moments, std::uint32_t*& out_param_steps);
     void step_optimizer(float* params_full_precision, std::uint16_t* params, const float* gradients, float* first_moments, float* second_moments, std::uint32_t* param_steps);
 

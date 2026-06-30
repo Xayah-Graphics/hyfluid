@@ -2,6 +2,8 @@ module;
 #include "hyfluid.train.h"
 #include "hyfluid.train.config.h"
 
+#include "json/json.hpp"
+
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 module hyfluid.train;
@@ -28,7 +30,7 @@ namespace hyfluid::train {
                 if (!std::isfinite(dataset.voxel_scale[i]) || dataset.voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
                 if (!std::isfinite(dataset.render_center[i])) throw std::runtime_error{"render_center contains non-finite values."};
             }
-            const std::array field_sim_extent = {
+            constexpr std::array field_sim_extent = {
                 config::scalar_real_active_sim_max[0u] - config::scalar_real_active_sim_min[0u],
                 config::scalar_real_active_sim_max[1u] - config::scalar_real_active_sim_min[1u],
                 config::scalar_real_active_sim_max[2u] - config::scalar_real_active_sim_min[2u],
@@ -75,8 +77,8 @@ namespace hyfluid::train {
                     if (this->host.frames.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) throw std::runtime_error{"dynamic dataset contains too many frames."};
                     if (frame_set.frames.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - this->host.frames.size()) throw std::runtime_error{"dynamic dataset contains too many frames."};
 
-                    const std::uint32_t host_frame_set_index = static_cast<std::uint32_t>(this->host.frame_sets.size());
-                    const std::uint32_t host_frame_offset = static_cast<std::uint32_t>(this->host.frames.size());
+                    const auto host_frame_set_index = static_cast<std::uint32_t>(this->host.frame_sets.size());
+                    const auto host_frame_offset = static_cast<std::uint32_t>(this->host.frames.size());
                     const FrameView& first_frame = frame_set.frames.front();
                     if (first_frame.width == 0u || first_frame.height == 0u) throw std::runtime_error{std::format("frame set '{}' contains a frame with invalid dimensions.", frame_set.name)};
                     if (first_frame.height > std::numeric_limits<std::uint64_t>::max() / static_cast<std::uint64_t>(first_frame.width) / 4ull) throw std::runtime_error{std::format("frame set '{}' contains an image that is too large.", frame_set.name)};
@@ -90,7 +92,7 @@ namespace hyfluid::train {
                     std::vector<float> times;
                     std::vector<std::uint32_t> view_indices;
                     std::vector<std::uint32_t> time_indices;
-                    std::vector<std::uint32_t> frame_indices(frame_set.frames.size(), std::numeric_limits<std::uint32_t>::max());
+                    std::vector frame_indices(frame_set.frames.size(), std::numeric_limits<std::uint32_t>::max());
                     std::vector<std::array<float, 12u>> view_camera(frame_set.view_count);
                     std::vector<std::array<float, 4u>> view_intrinsics(frame_set.view_count);
                     std::vector<std::uint8_t> view_reference_seen(frame_set.view_count, 0u);
@@ -113,7 +115,7 @@ namespace hyfluid::train {
                         if (frame.time_index >= frame_set.time_count) throw std::runtime_error{std::format("frame set '{}' contains time_index {} outside time_count {}.", frame_set.name, frame.time_index, frame_set.time_count)};
                         for (const float camera_value : frame.camera)
                             if (!std::isfinite(camera_value)) throw std::runtime_error{std::format("frame set '{}' contains non-finite camera values.", frame_set.name)};
-                        const std::array<float, 4u> frame_intrinsics = {frame.focal_x, frame.focal_y, frame.principal_x, frame.principal_y};
+                        const std::array frame_intrinsics = {frame.focal_x, frame.focal_y, frame.principal_x, frame.principal_y};
                         if (view_reference_seen[frame.view_index] == 0u) {
                             for (std::size_t i = 0uz; i < 12uz; ++i) view_camera[frame.view_index][i] = frame.camera[i];
                             view_intrinsics[frame.view_index] = frame_intrinsics;
@@ -182,8 +184,8 @@ namespace hyfluid::train {
             {
                 std::vector<std::vector<std::uint8_t>> video_seen_by_frame_set;
                 video_seen_by_frame_set.reserve(this->host.frame_sets.size());
-                std::vector<std::uint32_t> video_count_by_frame_set(this->host.frame_sets.size(), 0u);
-                for (const HostFrameSet& frame_set : this->host.frame_sets) video_seen_by_frame_set.push_back(std::vector<std::uint8_t>(frame_set.view_count, 0u));
+                std::vector video_count_by_frame_set(this->host.frame_sets.size(), 0u);
+                for (const HostFrameSet& frame_set : this->host.frame_sets) video_seen_by_frame_set.emplace_back(frame_set.view_count, 0u);
                 for (const VideoView& video : dataset.videos) {
                     if (video.frame_set.empty()) throw std::runtime_error{"video frame_set must not be empty."};
                     if (video.file_name.empty()) throw std::runtime_error{"video file_name must not be empty."};
@@ -267,7 +269,7 @@ namespace hyfluid::train {
         for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
     }
 
-    std::expected<OptimizationStats, std::string> HyFluid::optimize(const OptimizationRequest request) {
+    std::expected<OptimizationStats, std::string> HyFluid::optimize(const OptimizationRequest& request) {
         try {
             if (request.frame_set.empty()) throw std::runtime_error{"optimization frame set must not be empty."};
             if (request.iterations < 1) throw std::runtime_error{"optimization iterations must be positive."};
@@ -331,7 +333,7 @@ namespace hyfluid::train {
         }
     }
 
-    std::expected<EvaluationStats, std::string> HyFluid::evaluate(const EvaluationRequest request) const {
+    std::expected<EvaluationStats, std::string> HyFluid::evaluate(const EvaluationRequest& request) const {
         try {
             if (request.frame_set.empty()) throw std::runtime_error{"evaluation frame set must not be empty."};
             if (request.output_dir.empty()) throw std::runtime_error{"evaluation output directory must not be empty."};
@@ -424,17 +426,207 @@ namespace hyfluid::train {
 
     std::expected<void, std::string> HyFluid::export_weights(const std::filesystem::path& path) const {
         try {
+            static_assert(std::endian::native == std::endian::little);
             if (path.empty()) throw std::runtime_error{"weights export path must not be empty."};
-            throw std::runtime_error{"HyFluid weights export is not implemented yet."};
+            if (!path.parent_path().empty() && !std::filesystem::is_directory(path.parent_path())) throw std::runtime_error{std::format("weights export parent directory '{}' does not exist.", path.parent_path().string())};
+            if (this->device.params_full_precision == nullptr) throw std::runtime_error{"trainable parameters are not initialized."};
+
+            struct SafetensorsTensor final {
+                std::string_view name;
+                std::uint32_t param_offset;
+                std::uint64_t rows;
+                std::uint64_t cols;
+            };
+
+            constexpr std::array tensors = std::to_array<SafetensorsTensor>({
+                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = config::network_parameter_layout.mlp_input_weight_offset, .rows = config::mlp_width, .cols = config::mlp_input_width},
+                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = config::network_parameter_layout.mlp_output_weight_offset, .rows = config::network_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "density_global_rgb.param", .param_offset = config::network_parameter_layout.global_rgb_offset, .rows = 1u, .cols = 1u},
+                SafetensorsTensor{.name = "hash4.params", .param_offset = config::network_parameter_layout.hash4_param_offset, .rows = config::network_parameter_layout.hash4_param_count / config::hash4_features_per_level, .cols = config::hash4_features_per_level},
+            });
+
+            std::vector<float> host_params(config::network_parameter_layout.total_param_count);
+            cuda::download_trainable_parameters(this->device.params_full_precision, host_params.data());
+
+            std::string hash4_resolutions_text;
+            for (std::uint32_t i = 0u; i < config::hash4_level_count; ++i) {
+                if (!hash4_resolutions_text.empty()) hash4_resolutions_text += ",";
+                hash4_resolutions_text += std::format("{}", config::hash4_resolutions[i]);
+            }
+
+            std::string hash4_offsets_text;
+            for (std::uint32_t i = 0u; i < config::hash4_level_count + 1u; ++i) {
+                if (!hash4_offsets_text.empty()) hash4_offsets_text += ",";
+                hash4_offsets_text += std::format("{}", config::network_parameter_layout.hash4_offsets[i]);
+            }
+
+            nlohmann::json metadata              = nlohmann::json::object();
+            metadata["format"]                   = "hyfluid.density.weights.v1";
+            metadata["stage"]                    = "density";
+            metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}|domain:min{:.9g},{:.9g},{:.9g}:max{:.9g},{:.9g},{:.9g}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count, config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u], config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+            metadata["hash4_level_count"]        = std::format("{}", config::hash4_level_count);
+            metadata["hash4_features_per_level"] = std::format("{}", config::hash4_features_per_level);
+            metadata["hash4_max_entries"]        = std::format("{}", config::hash4_max_entries);
+            metadata["hash4_resolutions"]        = hash4_resolutions_text;
+            metadata["hash4_offsets"]            = hash4_offsets_text;
+            metadata["mlp_width"]                = std::format("{}", config::mlp_width);
+            metadata["mlp_input_width"]          = std::format("{}", config::mlp_input_width);
+            metadata["network_output_width"]     = std::format("{}", config::network_output_width);
+            metadata["global_rgb_offset"]        = std::format("{}", config::network_parameter_layout.global_rgb_offset);
+            metadata["total_param_count"]        = std::format("{}", config::network_parameter_layout.total_param_count);
+            metadata["sample_coord_floats"]      = std::format("{}", config::sample_coord_floats);
+            metadata["active_sim_min"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u]);
+            metadata["active_sim_max"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+
+            nlohmann::json header  = nlohmann::json::object();
+            header["__metadata__"] = metadata;
+
+            std::uint64_t data_offset = 0u;
+            for (const SafetensorsTensor& tensor : tensors) {
+                const std::uint64_t byte_count   = tensor.rows * tensor.cols * sizeof(float);
+                header[std::string{tensor.name}] = nlohmann::json{
+                    {"dtype", "F32"},
+                    {"shape", nlohmann::json::array({tensor.rows, tensor.cols})},
+                    {"data_offsets", nlohmann::json::array({data_offset, data_offset + byte_count})},
+                };
+                data_offset += byte_count;
+            }
+
+            const std::string header_text   = header.dump();
+            const std::uint64_t header_size = header_text.size();
+            std::ofstream output{path, std::ios::binary | std::ios::trunc};
+            if (!output) throw std::runtime_error{std::format("failed to open weights export path '{}'.", path.string())};
+
+            output.write(reinterpret_cast<const char*>(&header_size), sizeof(header_size));
+            output.write(header_text.data(), static_cast<std::streamsize>(header_text.size()));
+            for (const SafetensorsTensor& tensor : tensors) output.write(reinterpret_cast<const char*>(host_params.data() + tensor.param_offset), static_cast<std::streamsize>(tensor.rows * tensor.cols * sizeof(float)));
+            if (!output) throw std::runtime_error{std::format("failed to write weights file '{}'.", path.string())};
+
+            return {};
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
         }
     }
 
-    std::expected<void, std::string> HyFluid::load_weights(const std::filesystem::path& path) {
+    std::expected<void, std::string> HyFluid::load_weights(const std::filesystem::path& path) const {
         try {
+            static_assert(std::endian::native == std::endian::little);
+            if (this->host.current_step != 0u) throw std::runtime_error{"weights can only be loaded before training starts."};
             if (path.empty()) throw std::runtime_error{"weights load path must not be empty."};
-            throw std::runtime_error{"HyFluid weights load is not implemented yet."};
+            if (!std::filesystem::is_regular_file(path)) throw std::runtime_error{std::format("weights file '{}' does not exist.", path.string())};
+            if (this->device.params_full_precision == nullptr) throw std::runtime_error{"trainable parameters are not initialized."};
+
+            struct SafetensorsTensor final {
+                std::string_view name;
+                std::uint32_t param_offset;
+                std::uint64_t rows;
+                std::uint64_t cols;
+            };
+
+            constexpr std::array tensors = std::to_array<SafetensorsTensor>({
+                SafetensorsTensor{.name = "density_mlp.input.weight", .param_offset = config::network_parameter_layout.mlp_input_weight_offset, .rows = config::mlp_width, .cols = config::mlp_input_width},
+                SafetensorsTensor{.name = "density_mlp.output.weight", .param_offset = config::network_parameter_layout.mlp_output_weight_offset, .rows = config::network_output_width, .cols = config::mlp_width},
+                SafetensorsTensor{.name = "density_global_rgb.param", .param_offset = config::network_parameter_layout.global_rgb_offset, .rows = 1u, .cols = 1u},
+                SafetensorsTensor{.name = "hash4.params", .param_offset = config::network_parameter_layout.hash4_param_offset, .rows = config::network_parameter_layout.hash4_param_count / config::hash4_features_per_level, .cols = config::hash4_features_per_level},
+            });
+
+            std::string hash4_resolutions_text;
+            for (std::uint32_t i = 0u; i < config::hash4_level_count; ++i) {
+                if (!hash4_resolutions_text.empty()) hash4_resolutions_text += ",";
+                hash4_resolutions_text += std::format("{}", config::hash4_resolutions[i]);
+            }
+
+            std::string hash4_offsets_text;
+            for (std::uint32_t i = 0u; i < config::hash4_level_count + 1u; ++i) {
+                if (!hash4_offsets_text.empty()) hash4_offsets_text += ",";
+                hash4_offsets_text += std::format("{}", config::network_parameter_layout.hash4_offsets[i]);
+            }
+
+            nlohmann::json expected_metadata              = nlohmann::json::object();
+            expected_metadata["format"]                   = "hyfluid.density.weights.v1";
+            expected_metadata["stage"]                    = "density";
+            expected_metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}|domain:min{:.9g},{:.9g},{:.9g}:max{:.9g},{:.9g},{:.9g}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count, config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u], config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+            expected_metadata["hash4_level_count"]        = std::format("{}", config::hash4_level_count);
+            expected_metadata["hash4_features_per_level"] = std::format("{}", config::hash4_features_per_level);
+            expected_metadata["hash4_max_entries"]        = std::format("{}", config::hash4_max_entries);
+            expected_metadata["hash4_resolutions"]        = hash4_resolutions_text;
+            expected_metadata["hash4_offsets"]            = hash4_offsets_text;
+            expected_metadata["mlp_width"]                = std::format("{}", config::mlp_width);
+            expected_metadata["mlp_input_width"]          = std::format("{}", config::mlp_input_width);
+            expected_metadata["network_output_width"]     = std::format("{}", config::network_output_width);
+            expected_metadata["global_rgb_offset"]        = std::format("{}", config::network_parameter_layout.global_rgb_offset);
+            expected_metadata["total_param_count"]        = std::format("{}", config::network_parameter_layout.total_param_count);
+            expected_metadata["sample_coord_floats"]      = std::format("{}", config::sample_coord_floats);
+            expected_metadata["active_sim_min"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u]);
+            expected_metadata["active_sim_max"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+
+            const std::uintmax_t file_size = std::filesystem::file_size(path);
+            if (file_size < sizeof(std::uint64_t)) throw std::runtime_error{"weights file is too small for a safetensors header."};
+
+            std::ifstream input{path, std::ios::binary};
+            if (!input) throw std::runtime_error{std::format("failed to open weights file '{}'.", path.string())};
+
+            std::uint64_t header_size = 0u;
+            input.read(reinterpret_cast<char*>(&header_size), sizeof(header_size));
+            if (!input) throw std::runtime_error{"failed to read safetensors header length."};
+            if (header_size == 0u || header_size > 100ull * 1024ull * 1024ull) throw std::runtime_error{"invalid safetensors header length."};
+            if (sizeof(std::uint64_t) + header_size > file_size) throw std::runtime_error{"safetensors header length exceeds file size."};
+
+            std::string header_text(header_size, '\0');
+            input.read(header_text.data(), static_cast<std::streamsize>(header_text.size()));
+            if (!input) throw std::runtime_error{"failed to read safetensors header."};
+            if (header_text.empty() || header_text.front() != '{') throw std::runtime_error{"safetensors header must begin with '{'."};
+
+            const nlohmann::json header = nlohmann::json::parse(header_text);
+            if (!header.is_object()) throw std::runtime_error{"safetensors header must be a JSON object."};
+            if (header.size() != tensors.size() + 1uz) throw std::runtime_error{"safetensors header contains unexpected tensors."};
+            if (!header.contains("__metadata__") || !header.at("__metadata__").is_object()) throw std::runtime_error{"safetensors metadata is missing."};
+            if (header.at("__metadata__") != expected_metadata) throw std::runtime_error{"safetensors metadata does not match the current HyFluid density configuration."};
+
+            std::uint64_t expected_data_offset = 0u;
+            for (const SafetensorsTensor& tensor : tensors) {
+                const std::string tensor_name{tensor.name};
+                if (!header.contains(tensor_name)) throw std::runtime_error{std::format("safetensors tensor '{}' is missing.", tensor_name)};
+                const nlohmann::json& tensor_header = header.at(tensor_name);
+                if (!tensor_header.is_object() || tensor_header.size() != 3uz) throw std::runtime_error{std::format("safetensors tensor '{}' has an invalid header.", tensor_name)};
+                if (!tensor_header.contains("dtype") || !tensor_header.at("dtype").is_string() || tensor_header.at("dtype").get<std::string>() != "F32") throw std::runtime_error{std::format("safetensors tensor '{}' must use dtype F32.", tensor_name)};
+                if (!tensor_header.contains("shape") || !tensor_header.at("shape").is_array() || tensor_header.at("shape").size() != 2uz) throw std::runtime_error{std::format("safetensors tensor '{}' has an invalid shape.", tensor_name)};
+                if ((!tensor_header.at("shape").at(0uz).is_number_integer() && !tensor_header.at("shape").at(0uz).is_number_unsigned()) || (!tensor_header.at("shape").at(1uz).is_number_integer() && !tensor_header.at("shape").at(1uz).is_number_unsigned())) throw std::runtime_error{std::format("safetensors tensor '{}' shape must contain integer dimensions.", tensor_name)};
+                const std::int64_t actual_rows = tensor_header.at("shape").at(0uz).get<std::int64_t>();
+                const std::int64_t actual_cols = tensor_header.at("shape").at(1uz).get<std::int64_t>();
+                if (actual_rows < 0 || actual_cols < 0 || static_cast<std::uint64_t>(actual_rows) != tensor.rows || static_cast<std::uint64_t>(actual_cols) != tensor.cols) throw std::runtime_error{std::format("safetensors tensor '{}' shape mismatch.", tensor_name)};
+                if (!tensor_header.contains("data_offsets") || !tensor_header.at("data_offsets").is_array() || tensor_header.at("data_offsets").size() != 2uz) throw std::runtime_error{std::format("safetensors tensor '{}' has invalid data_offsets.", tensor_name)};
+                if ((!tensor_header.at("data_offsets").at(0uz).is_number_integer() && !tensor_header.at("data_offsets").at(0uz).is_number_unsigned()) || (!tensor_header.at("data_offsets").at(1uz).is_number_integer() && !tensor_header.at("data_offsets").at(1uz).is_number_unsigned())) throw std::runtime_error{std::format("safetensors tensor '{}' offsets must be integers.", tensor_name)};
+                const std::int64_t actual_begin_signed = tensor_header.at("data_offsets").at(0uz).get<std::int64_t>();
+                const std::int64_t actual_end_signed   = tensor_header.at("data_offsets").at(1uz).get<std::int64_t>();
+                if (actual_begin_signed < 0 || actual_end_signed < 0) throw std::runtime_error{std::format("safetensors tensor '{}' offsets must be non-negative.", tensor_name)};
+                const auto actual_begin = static_cast<std::uint64_t>(actual_begin_signed);
+                const auto actual_end   = static_cast<std::uint64_t>(actual_end_signed);
+                const std::uint64_t byte_count   = tensor.rows * tensor.cols * sizeof(float);
+                if (actual_begin != expected_data_offset || actual_end != actual_begin + byte_count) throw std::runtime_error{std::format("safetensors tensor '{}' data_offsets mismatch.", tensor_name)};
+                expected_data_offset += byte_count;
+            }
+
+            const std::uint64_t file_data_size = file_size - sizeof(std::uint64_t) - header_size;
+            if (expected_data_offset != file_data_size) throw std::runtime_error{"safetensors data buffer size does not match tensor offsets."};
+
+            std::vector<char> data(file_data_size);
+            if (!data.empty()) input.read(data.data(), static_cast<std::streamsize>(data.size()));
+            if (!input) throw std::runtime_error{"failed to read safetensors tensor data."};
+
+            std::vector host_params(config::network_parameter_layout.total_param_count, 0.0f);
+            std::uint64_t data_offset = 0u;
+            for (const SafetensorsTensor& tensor : tensors) {
+                const std::uint64_t byte_count = tensor.rows * tensor.cols * sizeof(float);
+                std::memcpy(host_params.data() + tensor.param_offset, data.data() + data_offset, byte_count);
+                data_offset += byte_count;
+            }
+
+            for (const float value : host_params)
+                if (!std::isfinite(value)) throw std::runtime_error{"weights file contains non-finite values."};
+
+            cuda::upload_trainable_parameters(host_params.data(), this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
+            return {};
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
         }

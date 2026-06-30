@@ -1,12 +1,10 @@
-#include "hyfluid.train.h"
 #include "hyfluid.train.config.h"
+#include "hyfluid.train.h"
 #include <cublasLt.h>
 #include <cublas_v2.h>
 #include <cuda/std/algorithm>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <algorithm>
-#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -230,7 +228,7 @@ namespace hyfluid::cuda {
 
             out_view_index = rng.next_uint() % view_count;
             const std::uint32_t base_time_index = time_count == 1u ? 0u : rng.next_uint() % time_count;
-            const float max_time_index = static_cast<float>(time_count - 1u);
+            const auto max_time_index = static_cast<float>(time_count - 1u);
             const float fractional_time_index = time_count == 1u ? 0.0f : fminf(fmaxf(static_cast<float>(base_time_index) + rng.next_float() - 0.5f, 0.0f), max_time_index);
             out_floor_time_index = static_cast<std::uint32_t>(floorf(fractional_time_index));
             out_ceil_time_index = time_count == 1u ? 0u : ::cuda::std::min(out_floor_time_index + 1u, time_count - 1u);
@@ -238,8 +236,8 @@ namespace hyfluid::cuda {
 
             const std::uint32_t training_width = width / train::config::training_image_downsample;
             const std::uint32_t training_height = height / train::config::training_image_downsample;
-            float u = rng.next_float();
-            float v = rng.next_float();
+            const float u = rng.next_float();
+            const float v = rng.next_float();
             if (train::config::snap_to_pixel_centers) {
                 out_pixel_x = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(training_width)), training_width - 1u);
                 out_pixel_y = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(training_height)), training_height - 1u);
@@ -263,12 +261,12 @@ namespace hyfluid::cuda {
             float start_jitter = 0.0f;
             replay_training_ray_rng(i, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, start_jitter);
 
-            const float max_time_index = static_cast<float>(time_count - 1u);
+            const auto max_time_index = static_cast<float>(time_count - 1u);
             const float normalized_time = time_count == 1u ? 0.0f : (static_cast<float>(floor_time_index) + time_residual) / max_time_index;
             const std::uint32_t floor_frame_index = frame_indices[view_index * time_count + floor_time_index];
             const float* frame_camera = camera + static_cast<std::uint64_t>(floor_frame_index) * 12u;
             const float* frame_intrinsics = intrinsics + static_cast<std::uint64_t>(floor_frame_index) * 4u;
-            const float training_pixel_scale = static_cast<float>(train::config::training_image_downsample);
+            constexpr auto training_pixel_scale = static_cast<float>(train::config::training_image_downsample);
             const float sample_x = (static_cast<float>(pixel_x) + 0.5f) * training_pixel_scale;
             const float sample_y = (static_cast<float>(pixel_y) + 0.5f) * training_pixel_scale;
             const float ray_x = (sample_x - frame_intrinsics[2u]) / frame_intrinsics[0u];
@@ -377,6 +375,12 @@ namespace hyfluid::cuda {
             }
             params_full_precision[i] = value;
             params[i] = __float2half(value);
+        }
+
+        __global__ void cast_trainable_parameters_kernel(const float* __restrict__ params_full_precision, __half* __restrict__ params) {
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i >= train::config::network_parameter_layout.total_param_count) return;
+            params[i] = __float2half(params_full_precision[i]);
         }
 
         __global__ void hash4_encode_forward_kernel(const std::uint32_t sample_count, const float* __restrict__ sample_coords, const __half* __restrict__ hash_params, __half* __restrict__ network_input) {
@@ -521,7 +525,7 @@ namespace hyfluid::cuda {
             const std::uint32_t pixel_index = pixel_offset + i;
             const std::uint32_t pixel_x = pixel_index % render_width;
             const std::uint32_t pixel_y = pixel_index / render_width;
-            const float training_pixel_scale = static_cast<float>(train::config::training_image_downsample);
+            constexpr auto training_pixel_scale = static_cast<float>(train::config::training_image_downsample);
             const float sample_x = (static_cast<float>(pixel_x) + 0.5f) * training_pixel_scale;
             const float sample_y = (static_cast<float>(pixel_y) + 0.5f) * training_pixel_scale;
             const float ray_x = (sample_x - frame_intrinsics[2u]) / frame_intrinsics[0u];
@@ -628,7 +632,7 @@ namespace hyfluid::cuda {
             const float difference_x = prediction - target.x;
             const float difference_y = prediction - target.y;
             const float difference_z = prediction - target.z;
-            atomicAdd(loss_sum, static_cast<double>(difference_x * difference_x + difference_y * difference_y + difference_z * difference_z));
+            atomicAdd(loss_sum, difference_x * difference_x + difference_y * difference_y + difference_z * difference_z);
 
             const std::uint64_t output_offset = static_cast<std::uint64_t>(pixel_index) * 3ull;
             const std::uint8_t rgb = to_rgb8(prediction);
@@ -641,8 +645,8 @@ namespace hyfluid::cuda {
             const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i >= *ray_counter) return;
 
-            std::uint32_t numsteps = numsteps_in[i * 2u + 0u];
-            std::uint32_t base = numsteps_in[i * 2u + 1u];
+            const std::uint32_t numsteps = numsteps_in[i * 2u + 0u];
+            const std::uint32_t base = numsteps_in[i * 2u + 1u];
             const __half* output = network_output + static_cast<std::uint64_t>(base) * train::config::network_output_width;
             const float* coord_in = coords_in + static_cast<std::uint64_t>(base) * train::config::sample_coord_floats;
 
@@ -696,7 +700,7 @@ namespace hyfluid::cuda {
 
             output = network_output + static_cast<std::uint64_t>(base) * train::config::network_output_width;
             coord_in = coords_in + static_cast<std::uint64_t>(base) * train::config::sample_coord_floats;
-            std::uint32_t compacted_base = atomicAdd(compacted_sample_counter, compacted_numsteps);
+            const std::uint32_t compacted_base = atomicAdd(compacted_sample_counter, compacted_numsteps);
             const std::uint32_t remaining_slots = compacted_base < train::config::network_batch_size ? train::config::network_batch_size - compacted_base : 0u;
             compacted_numsteps = compacted_numsteps < remaining_slots ? compacted_numsteps : remaining_slots;
             numsteps_in[i * 2u + 0u] = compacted_numsteps;
@@ -943,6 +947,24 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"initialize_trainable_parameters_kernel failed: "} + cudaGetErrorString(status)};
     }
 
+    void download_trainable_parameters(const float* const params_full_precision, float* const out_params_full_precision) {
+        if (params_full_precision == nullptr || out_params_full_precision == nullptr) throw std::runtime_error{"invalid trainable parameter download input."};
+        if (const cudaError_t status = cudaMemcpy(out_params_full_precision, params_full_precision, static_cast<std::size_t>(train::config::network_parameter_layout.total_param_count) * sizeof(float), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy trainable params download failed: "} + cudaGetErrorString(status)};
+    }
+
+    void upload_trainable_parameters(const float* const params_full_precision, float* const out_params_full_precision, std::uint16_t* const out_params, float* const out_param_gradients, float* const optimizer_first_moments, float* const optimizer_second_moments, std::uint32_t* const optimizer_param_steps) {
+        if (params_full_precision == nullptr || out_params_full_precision == nullptr || out_params == nullptr || out_param_gradients == nullptr || optimizer_first_moments == nullptr || optimizer_second_moments == nullptr || optimizer_param_steps == nullptr) throw std::runtime_error{"invalid trainable parameter upload input."};
+        constexpr std::size_t param_bytes = static_cast<std::size_t>(train::config::network_parameter_layout.total_param_count) * sizeof(float);
+        if (const cudaError_t status = cudaMemcpy(out_params_full_precision, params_full_precision, param_bytes, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy trainable params upload failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(out_param_gradients, 0, param_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset uploaded trainable gradients failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(optimizer_first_moments, 0, param_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset uploaded optimizer first moments failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(optimizer_second_moments, 0, param_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset uploaded optimizer second moments failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(optimizer_param_steps, 0, static_cast<std::size_t>(train::config::network_parameter_layout.total_param_count) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset uploaded optimizer param steps failed: "} + cudaGetErrorString(status)};
+        constexpr std::uint32_t blocks = (train::config::network_parameter_layout.total_param_count + train::config::threads_per_block - 1u) / train::config::threads_per_block;
+        cast_trainable_parameters_kernel<<<blocks, train::config::threads_per_block>>>(out_params_full_precision, reinterpret_cast<__half*>(out_params));
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"cast_trainable_parameters_kernel failed: "} + cudaGetErrorString(status)};
+    }
+
     void allocate_optimizer_buffers(float*& out_first_moments, float*& out_second_moments, std::uint32_t*& out_param_steps) {
         out_first_moments = nullptr;
         out_second_moments = nullptr;
@@ -961,7 +983,7 @@ namespace hyfluid::cuda {
         constexpr dim3 grid_blocks{(train::config::network_batch_size + train::config::grid_forward_threads - 1u) / train::config::grid_forward_threads, train::config::hash4_level_count, 1u};
         hash4_encode_forward_kernel<<<grid_blocks, train::config::grid_forward_threads>>>(sample_count, sample_coords, reinterpret_cast<const __half*>(params + train::config::network_parameter_layout.hash4_param_offset), reinterpret_cast<__half*>(network_input));
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"hash4_encode_forward_kernel failed: "} + cudaGetErrorString(status)};
-        cublasLtHandle_t cublaslt = static_cast<cublasLtHandle_t>(cublaslt_handle);
+        const auto cublaslt = static_cast<cublasLtHandle_t>(cublaslt_handle);
         cublaslt_matmul_row_major(cublaslt, CUBLAS_OP_N, CUBLAS_OP_T, CUDA_R_16F, CUDA_R_16F, CUDA_R_16F, network_input, static_cast<int>(sample_count), train::config::mlp_input_width, params + train::config::network_parameter_layout.mlp_input_weight_offset, train::config::mlp_width, train::config::mlp_input_width, network_hidden, static_cast<int>(sample_count), train::config::mlp_width, 1.0f, 0.0f, cublaslt_workspace);
         relu_half_kernel<<<(sample_count * train::config::mlp_width + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(sample_count * train::config::mlp_width, reinterpret_cast<__half*>(network_hidden));
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"relu hidden failed: "} + cudaGetErrorString(status)};
@@ -978,7 +1000,7 @@ namespace hyfluid::cuda {
         const std::uint32_t render_height = height / train::config::training_image_downsample;
         const std::uint64_t render_pixels_64 = static_cast<std::uint64_t>(render_width) * render_height;
         if (render_pixels_64 == 0ull || render_pixels_64 > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation image has invalid render dimensions."};
-        const std::uint32_t render_pixels = static_cast<std::uint32_t>(render_pixels_64);
+        const auto render_pixels = static_cast<std::uint32_t>(render_pixels_64);
         if (render_pixels > render_pixel_capacity) throw std::runtime_error{"evaluation image exceeds allocated render pixel capacity."};
 
         if (const cudaError_t status = cudaMemset(evaluation_loss_sum, 0, sizeof(double)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset evaluation loss sum failed: "} + cudaGetErrorString(status)};
@@ -1036,7 +1058,7 @@ namespace hyfluid::cuda {
         if (sample_coords == nullptr || params == nullptr || param_gradients == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || network_output_gradients == nullptr || network_input_gradients == nullptr || network_hidden_gradients == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr) throw std::runtime_error{"invalid network backward input."};
         prepare_output_gradient_kernel<<<(train::config::network_batch_size + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(train::config::network_batch_size, reinterpret_cast<const __half*>(network_output), reinterpret_cast<__half*>(const_cast<std::uint16_t*>(network_output_gradients)));
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"prepare_output_gradient_kernel failed: "} + cudaGetErrorString(status)};
-        cublasLtHandle_t cublaslt = static_cast<cublasLtHandle_t>(cublaslt_handle);
+        const auto cublaslt = static_cast<cublasLtHandle_t>(cublaslt_handle);
         cublaslt_matmul_row_major(cublaslt, CUBLAS_OP_T, CUBLAS_OP_N, CUDA_R_16F, CUDA_R_16F, CUDA_R_32F, network_output_gradients, train::config::network_batch_size, train::config::network_output_width, network_hidden, train::config::network_batch_size, train::config::mlp_width, param_gradients + train::config::network_parameter_layout.mlp_output_weight_offset, train::config::network_output_width, train::config::mlp_width, 1.0f, 0.0f, cublaslt_workspace);
         cublaslt_matmul_row_major(cublaslt, CUBLAS_OP_N, CUBLAS_OP_N, CUDA_R_16F, CUDA_R_16F, CUDA_R_16F, network_output_gradients, train::config::network_batch_size, train::config::network_output_width, params + train::config::network_parameter_layout.mlp_output_weight_offset, train::config::network_output_width, train::config::mlp_width, network_hidden_gradients, train::config::network_batch_size, train::config::mlp_width, 1.0f, 0.0f, cublaslt_workspace);
         prepare_hidden_gradient_kernel<<<(train::config::network_batch_size * train::config::mlp_width + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(train::config::network_batch_size * train::config::mlp_width, reinterpret_cast<const __half*>(network_hidden), reinterpret_cast<__half*>(network_hidden_gradients));
