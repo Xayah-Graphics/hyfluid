@@ -94,20 +94,20 @@ export namespace hyfluid::plugin {
         }
 
         OptionSchema& slider(const float min, const float max, const float step) & {
-            this->presentation = ControlOptionPresentationSlider;
+            this->presentation      = ControlOptionPresentationSlider;
             this->has_numeric_range = true;
-            this->numeric_min = min;
-            this->numeric_max = max;
-            this->numeric_step = step;
+            this->numeric_min       = min;
+            this->numeric_max       = max;
+            this->numeric_step      = step;
             return *this;
         }
 
         [[nodiscard]] OptionSchema slider(const float min, const float max, const float step) && {
-            this->presentation = ControlOptionPresentationSlider;
+            this->presentation      = ControlOptionPresentationSlider;
             this->has_numeric_range = true;
-            this->numeric_min = min;
-            this->numeric_max = max;
-            this->numeric_step = step;
+            this->numeric_min       = min;
+            this->numeric_max       = max;
+            this->numeric_step      = step;
             return std::move(*this);
         }
     };
@@ -768,18 +768,18 @@ export namespace hyfluid::plugin {
     template <typename Project>
     [[nodiscard]] TypeErasedPluginDefinition erase_plugin_definition(const PluginDefinition<Project>& definition) {
         TypeErasedPluginDefinition erased{
-            .id                      = definition.id,
-            .title                   = definition.title,
-            .open_action_label       = definition.open_action_label,
-            .sections                = definition.sections,
-            .open_options            = definition.open_options,
-            .open                    = [](OpenContext context) -> void* { return new Project{Project::open(std::move(context))}; },
-            .destroy                 = [](void* project) { delete static_cast<Project*>(project); },
-            .update                  = [](void* project, const UpdateInfo& update) { static_cast<Project*>(project)->update(update); },
-            .revision                = [](void* project) -> std::uint64_t { return static_cast<Project*>(project)->revision(); },
-            .write_document          = [](void* project, SceneBuilder& scene) { static_cast<Project*>(project)->write_document(scene); },
-            .write_frame             = [](void* project, SceneBuilder& scene, const FrameInfo& frame) { static_cast<Project*>(project)->write_frame(scene, frame); },
-            .write_controls          = [](void* project, ControlBuilder& controls) { static_cast<Project*>(project)->write_controls(controls); },
+            .id                = definition.id,
+            .title             = definition.title,
+            .open_action_label = definition.open_action_label,
+            .sections          = definition.sections,
+            .open_options      = definition.open_options,
+            .open              = [](OpenContext context) -> void* { return new Project{Project::open(std::move(context))}; },
+            .destroy           = [](void* project) { delete static_cast<Project*>(project); },
+            .update            = [](void* project, const UpdateInfo& update) { static_cast<Project*>(project)->update(update); },
+            .revision          = [](void* project) -> std::uint64_t { return static_cast<Project*>(project)->revision(); },
+            .write_document    = [](void* project, SceneBuilder& scene) { static_cast<Project*>(project)->write_document(scene); },
+            .write_frame       = [](void* project, SceneBuilder& scene, const FrameInfo& frame) { static_cast<Project*>(project)->write_frame(scene, frame); },
+            .write_controls    = [](void* project, ControlBuilder& controls) { static_cast<Project*>(project)->write_controls(controls); },
         };
         erased.actions.reserve(definition.actions.size());
         for (const ActionBinding<Project>& action : definition.actions) {
@@ -812,16 +812,16 @@ namespace hyfluid::plugin {
     typedef void SpectraSceneInstance;
 
     typedef std::uint32_t SpectraSceneResult;
-    constexpr std::uint32_t SPECTRA_SCENE_RESULT_OK                      = 0u;
-    constexpr std::uint32_t SPECTRA_SCENE_RESULT_ERROR                   = 1u;
+    constexpr std::uint32_t SPECTRA_SCENE_RESULT_OK                       = 0u;
+    constexpr std::uint32_t SPECTRA_SCENE_RESULT_ERROR                    = 1u;
     constexpr std::uint32_t SPECTRA_SCENE_GPU_BUFFER_VOLUME_CHANNEL       = 0u;
     constexpr std::uint32_t SPECTRA_SCENE_GPU_BUFFER_VIEWPORT_VOXEL_GRID  = 1u;
     constexpr std::uint32_t SPECTRA_SCENE_GPU_BUFFER_POINT_CLOUD          = 2u;
     constexpr std::uint32_t SPECTRA_SCENE_GPU_BUFFER_VIEWPORT_SEGMENT_SET = 3u;
-    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_STATIC                = 0u;
-    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_INDEXED               = 1u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_PRESENTATION_DEFAULT    = 0u;
-    constexpr std::uint32_t SPECTRA_SCENE_OPTION_PRESENTATION_SLIDER     = 1u;
+    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_STATIC                 = 0u;
+    constexpr std::uint32_t SPECTRA_SCENE_TIMELINE_INDEXED                = 1u;
+    constexpr std::uint32_t SPECTRA_SCENE_OPTION_PRESENTATION_DEFAULT     = 0u;
+    constexpr std::uint32_t SPECTRA_SCENE_OPTION_PRESENTATION_SLIDER      = 1u;
 
     struct SpectraSceneOption {
         const char* key{};
@@ -1421,19 +1421,19 @@ namespace hyfluid::plugin {
                 storage.choices[index].reserve(schema.choices.size());
                 for (const OptionChoice& choice : schema.choices) storage.choices[index].push_back(SpectraSceneControlOptionChoice{.value = choice.value.c_str(), .label = choice.label.c_str()});
                 storage.schemas.push_back(SpectraSceneControlOptionSchema{
-                    .key           = schema.key.c_str(),
-                    .label         = schema.label.c_str(),
-                    .description   = schema.description.c_str(),
-                    .kind          = static_cast<std::uint32_t>(schema.kind),
-                    .required      = schema.required_flag ? 1u : 0u,
-                    .default_value = schema.default_value.c_str(),
-                    .section_id    = schema.section_id.c_str(),
-                    .choices       = SpectraSceneControlOptionChoiceSpan{.data = storage.choices[index].empty() ? nullptr : storage.choices[index].data(), .count = static_cast<std::uint64_t>(storage.choices[index].size())},
-                    .presentation  = schema.presentation,
+                    .key               = schema.key.c_str(),
+                    .label             = schema.label.c_str(),
+                    .description       = schema.description.c_str(),
+                    .kind              = static_cast<std::uint32_t>(schema.kind),
+                    .required          = schema.required_flag ? 1u : 0u,
+                    .default_value     = schema.default_value.c_str(),
+                    .section_id        = schema.section_id.c_str(),
+                    .choices           = SpectraSceneControlOptionChoiceSpan{.data = storage.choices[index].empty() ? nullptr : storage.choices[index].data(), .count = static_cast<std::uint64_t>(storage.choices[index].size())},
+                    .presentation      = schema.presentation,
                     .has_numeric_range = schema.has_numeric_range ? 1u : 0u,
-                    .numeric_min   = schema.numeric_min,
-                    .numeric_max   = schema.numeric_max,
-                    .numeric_step  = schema.numeric_step,
+                    .numeric_min       = schema.numeric_min,
+                    .numeric_max       = schema.numeric_max,
+                    .numeric_step      = schema.numeric_step,
                 });
             }
             return storage;
@@ -1612,12 +1612,12 @@ namespace hyfluid::plugin {
             copy_array(view.forward, camera.forward);
             if (camera.image.has_value()) {
                 const CameraImage& image = *camera.image;
-                view.image = SpectraSceneCameraImage{
-                    .rgba8      = image.rgba8,
-                    .rgba8_size = image.rgba8_size,
-                    .revision   = image.revision,
-                    .width      = image.width,
-                    .height     = image.height,
+                view.image               = SpectraSceneCameraImage{
+                                  .rgba8      = image.rgba8,
+                                  .rgba8_size = image.rgba8_size,
+                                  .revision   = image.revision,
+                                  .width      = image.width,
+                                  .height     = image.height,
                 };
             }
             return view;
@@ -1692,14 +1692,14 @@ namespace hyfluid::plugin {
             switch (timeline.kind) {
             case TimelineKind::Static:
                 return SpectraSceneTimeline{
-                    .kind = SPECTRA_SCENE_TIMELINE_STATIC,
-                    .frame_rate = timeline.frame_rate,
+                    .kind        = SPECTRA_SCENE_TIMELINE_STATIC,
+                    .frame_rate  = timeline.frame_rate,
                     .frame_count = timeline.frame_count,
                 };
             case TimelineKind::Indexed:
                 return SpectraSceneTimeline{
-                    .kind = SPECTRA_SCENE_TIMELINE_INDEXED,
-                    .frame_rate = timeline.frame_rate,
+                    .kind        = SPECTRA_SCENE_TIMELINE_INDEXED,
+                    .frame_rate  = timeline.frame_rate,
                     .frame_count = timeline.frame_count,
                 };
             }
@@ -1708,8 +1708,8 @@ namespace hyfluid::plugin {
 
         [[nodiscard]] SpectraSceneUpdateDescriptor make_update_view(const UpdateDescriptor& update) {
             return SpectraSceneUpdateDescriptor{
-                .enabled = update.enabled ? 1u : 0u,
-                .initial_running = update.initial_running ? 1u : 0u,
+                .enabled            = update.enabled ? 1u : 0u,
+                .initial_running    = update.initial_running ? 1u : 0u,
                 .step_delta_seconds = update.step_delta_seconds,
             };
         }
@@ -1742,20 +1742,20 @@ namespace hyfluid::plugin {
             cache.voxel_grid_views.reserve(cache.document.debug_attachments.viewport_voxel_grids.size());
             for (const ViewportVoxelGrid& grid : cache.document.debug_attachments.viewport_voxel_grids) cache.voxel_grid_views.push_back(make_voxel_grid_view(grid));
             return SpectraSceneDocumentView{
-                .struct_size               = sizeof(SpectraSceneDocumentView),
-                .timeline                  = make_timeline_view(cache.document.timeline),
-                .update                    = make_update_view(cache.document.update),
-                .navigation_target         = make_navigation_target_view(cache.document.navigation_target),
-                .active_camera_name        = cache.document.active_camera_name.c_str(),
+                .struct_size        = sizeof(SpectraSceneDocumentView),
+                .timeline           = make_timeline_view(cache.document.timeline),
+                .update             = make_update_view(cache.document.update),
+                .navigation_target  = make_navigation_target_view(cache.document.navigation_target),
+                .active_camera_name = cache.document.active_camera_name.c_str(),
                 .items =
                     SpectraSceneItems{
-                        .materials               = SpectraSceneMaterialSpan{.data = cache.material_views.empty() ? nullptr : cache.material_views.data(), .count = static_cast<std::uint64_t>(cache.material_views.size())},
-                        .lights                  = SpectraSceneLightSpan{.data = cache.light_views.empty() ? nullptr : cache.light_views.data(), .count = static_cast<std::uint64_t>(cache.light_views.size())},
-                        .cameras                 = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
-                        .point_clouds            = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
-                        .volumes                 = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
-                        .viewport_segment_sets   = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},
-                        .viewport_voxel_grids    = SpectraSceneViewportVoxelGridSpan{.data = cache.voxel_grid_views.empty() ? nullptr : cache.voxel_grid_views.data(), .count = static_cast<std::uint64_t>(cache.voxel_grid_views.size())},
+                        .materials             = SpectraSceneMaterialSpan{.data = cache.material_views.empty() ? nullptr : cache.material_views.data(), .count = static_cast<std::uint64_t>(cache.material_views.size())},
+                        .lights                = SpectraSceneLightSpan{.data = cache.light_views.empty() ? nullptr : cache.light_views.data(), .count = static_cast<std::uint64_t>(cache.light_views.size())},
+                        .cameras               = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
+                        .point_clouds          = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
+                        .volumes               = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
+                        .viewport_segment_sets = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},
+                        .viewport_voxel_grids  = SpectraSceneViewportVoxelGridSpan{.data = cache.voxel_grid_views.empty() ? nullptr : cache.voxel_grid_views.data(), .count = static_cast<std::uint64_t>(cache.voxel_grid_views.size())},
                     },
             };
         }
@@ -1774,11 +1774,11 @@ namespace hyfluid::plugin {
                 .struct_size = sizeof(SpectraSceneFrameView),
                 .items =
                     SpectraSceneItems{
-                        .cameras                 = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
-                        .point_clouds            = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
-                        .volumes                 = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
-                        .viewport_segment_sets   = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},
-                        .viewport_voxel_grids    = SpectraSceneViewportVoxelGridSpan{.data = cache.voxel_grid_views.empty() ? nullptr : cache.voxel_grid_views.data(), .count = static_cast<std::uint64_t>(cache.voxel_grid_views.size())},
+                        .cameras               = SpectraSceneCameraSpan{.data = cache.camera_views.empty() ? nullptr : cache.camera_views.data(), .count = static_cast<std::uint64_t>(cache.camera_views.size())},
+                        .point_clouds          = SpectraScenePointCloudSpan{.data = cache.point_cloud_views.empty() ? nullptr : cache.point_cloud_views.data(), .count = static_cast<std::uint64_t>(cache.point_cloud_views.size())},
+                        .volumes               = SpectraSceneVolumeSpan{.data = cache.volume_views.empty() ? nullptr : cache.volume_views.data(), .count = static_cast<std::uint64_t>(cache.volume_views.size())},
+                        .viewport_segment_sets = SpectraSceneViewportSegmentSetSpan{.data = cache.segment_set_views.empty() ? nullptr : cache.segment_set_views.data(), .count = static_cast<std::uint64_t>(cache.segment_set_views.size())},
+                        .viewport_voxel_grids  = SpectraSceneViewportVoxelGridSpan{.data = cache.voxel_grid_views.empty() ? nullptr : cache.voxel_grid_views.data(), .count = static_cast<std::uint64_t>(cache.voxel_grid_views.size())},
                     },
             };
         }
@@ -1790,13 +1790,13 @@ namespace hyfluid::plugin {
             cache.action_state_views.reserve(cache.state.action_states.size());
             for (const Metric& metric : cache.state.metrics) {
                 cache.metric_views.push_back(SpectraSceneControlMetric{
-                    .key             = metric.key.c_str(),
-                    .label           = metric.label.c_str(),
-                    .value           = metric.value.c_str(),
-                    .section_id      = metric.section_id.c_str(),
-                    .display_flags   = metric.display_flags,
-                    .has_color       = metric.has_color ? 1u : 0u,
-                    .color           = {},
+                    .key           = metric.key.c_str(),
+                    .label         = metric.label.c_str(),
+                    .value         = metric.value.c_str(),
+                    .section_id    = metric.section_id.c_str(),
+                    .display_flags = metric.display_flags,
+                    .has_color     = metric.has_color ? 1u : 0u,
+                    .color         = {},
                 });
                 copy_array(cache.metric_views.back().color, metric.color);
             }
@@ -1922,7 +1922,7 @@ namespace hyfluid::plugin {
                 SceneBuilder builder{};
                 plugin_instance.definition->write_frame(plugin_instance.project, builder, FrameInfo{.delta_seconds = frame.delta_seconds, .time_seconds = frame.time_seconds, .frame_index = frame.frame_index});
                 plugin_instance.scene_abi.document = builder.document();
-                *snapshot = make_frame_abi_view(plugin_instance.scene_abi);
+                *snapshot                          = make_frame_abi_view(plugin_instance.scene_abi);
                 return SPECTRA_SCENE_RESULT_OK;
             } catch (const std::exception& error) {
                 if (instance != nullptr)
@@ -2036,25 +2036,25 @@ namespace hyfluid::plugin {
 
         PluginExportState::PluginExportState(const TypeErasedPluginDefinition& plugin_definition)
             : definition(plugin_definition), descriptor_storage(make_plugin_descriptor_storage(plugin_definition)), plugin(SpectraScenePlugin{
-                                                                                                                        .abi_version             = plugin_abi_version,
-                                                                                                                        .struct_size             = sizeof(SpectraScenePlugin),
-                                                                                                                        .id                      = plugin_definition.id.c_str(),
-                                                                                                                        .title                   = plugin_definition.title.c_str(),
-                                                                                                                        .open_action_label       = plugin_definition.open_action_label.c_str(),
-                                                                                                                        .sections                = SpectraSceneControlSectionSpan{.data = descriptor_storage.sections.empty() ? nullptr : descriptor_storage.sections.data(), .count = static_cast<std::uint64_t>(descriptor_storage.sections.size())},
-                                                                                                                        .open_options            = SpectraSceneControlOptionSchemaSpan{.data = descriptor_storage.open_options.schemas.empty() ? nullptr : descriptor_storage.open_options.schemas.data(), .count = static_cast<std::uint64_t>(descriptor_storage.open_options.schemas.size())},
-                                                                                                                        .control_actions         = SpectraSceneControlActionSpan{.data = descriptor_storage.control_actions.empty() ? nullptr : descriptor_storage.control_actions.data(), .count = static_cast<std::uint64_t>(descriptor_storage.control_actions.size())},
-                                                                                                                        .control_settings        = SpectraSceneControlOptionSchemaSpan{.data = descriptor_storage.control_settings.schemas.empty() ? nullptr : descriptor_storage.control_settings.schemas.data(), .count = static_cast<std::uint64_t>(descriptor_storage.control_settings.schemas.size())},
-                                                                                                                        .create                  = scene_create,
-                                                                                                                        .destroy                 = scene_destroy,
-                                                                                                                        .update                  = scene_update,
-                                                                                                                        .document                = scene_document,
-                                                                                                                        .frame                   = scene_frame,
-                                                                                                                        .scene_revision          = scene_revision,
-                                                                                                                        .control_action          = control_action,
-                                                                                                                        .control_setting_update  = control_setting_update,
-                                                                                                                        .control_state           = control_state,
-                                                                                                                        .last_error              = last_error,
+                                                                                                                        .abi_version            = plugin_abi_version,
+                                                                                                                        .struct_size            = sizeof(SpectraScenePlugin),
+                                                                                                                        .id                     = plugin_definition.id.c_str(),
+                                                                                                                        .title                  = plugin_definition.title.c_str(),
+                                                                                                                        .open_action_label      = plugin_definition.open_action_label.c_str(),
+                                                                                                                        .sections               = SpectraSceneControlSectionSpan{.data = descriptor_storage.sections.empty() ? nullptr : descriptor_storage.sections.data(), .count = static_cast<std::uint64_t>(descriptor_storage.sections.size())},
+                                                                                                                        .open_options           = SpectraSceneControlOptionSchemaSpan{.data = descriptor_storage.open_options.schemas.empty() ? nullptr : descriptor_storage.open_options.schemas.data(), .count = static_cast<std::uint64_t>(descriptor_storage.open_options.schemas.size())},
+                                                                                                                        .control_actions        = SpectraSceneControlActionSpan{.data = descriptor_storage.control_actions.empty() ? nullptr : descriptor_storage.control_actions.data(), .count = static_cast<std::uint64_t>(descriptor_storage.control_actions.size())},
+                                                                                                                        .control_settings       = SpectraSceneControlOptionSchemaSpan{.data = descriptor_storage.control_settings.schemas.empty() ? nullptr : descriptor_storage.control_settings.schemas.data(), .count = static_cast<std::uint64_t>(descriptor_storage.control_settings.schemas.size())},
+                                                                                                                        .create                 = scene_create,
+                                                                                                                        .destroy                = scene_destroy,
+                                                                                                                        .update                 = scene_update,
+                                                                                                                        .document               = scene_document,
+                                                                                                                        .frame                  = scene_frame,
+                                                                                                                        .scene_revision         = scene_revision,
+                                                                                                                        .control_action         = control_action,
+                                                                                                                        .control_setting_update = control_setting_update,
+                                                                                                                        .control_state          = control_state,
+                                                                                                                        .last_error             = last_error,
                                                                                                                     }) {}
 
         PluginExportState& PluginExportState::instance(const TypeErasedPluginDefinition* plugin_definition) {

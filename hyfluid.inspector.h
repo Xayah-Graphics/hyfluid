@@ -6,16 +6,16 @@
 
 namespace hyfluid::cuda {
     struct TrainingBatchDiagnostics final {
-        float coord_min[3u] = {};
-        float coord_max[3u] = {};
-        float time_min = 0.0f;
-        float time_max = 0.0f;
-        float dt_metric_min = 0.0f;
-        float dt_metric_mean = 0.0f;
-        float dt_metric_max = 0.0f;
-        float metric_per_field_unit_min = 0.0f;
+        float coord_min[3u]              = {};
+        float coord_max[3u]              = {};
+        float time_min                   = 0.0f;
+        float time_max                   = 0.0f;
+        float dt_metric_min              = 0.0f;
+        float dt_metric_mean             = 0.0f;
+        float dt_metric_max              = 0.0f;
+        float metric_per_field_unit_min  = 0.0f;
         float metric_per_field_unit_mean = 0.0f;
-        float metric_per_field_unit_max = 0.0f;
+        float metric_per_field_unit_max  = 0.0f;
     };
 
     void read_float_value(const float* values, std::uint32_t index, float& out_value);

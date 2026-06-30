@@ -1,5 +1,6 @@
 module;
 #include "hyfluid.train.h"
+
 #include "hyfluid.train.config.h"
 
 #include "json/json.hpp"
@@ -46,16 +47,16 @@ namespace hyfluid::train {
                 }
             }
             for (std::size_t column = 0uz; column < 3uz; ++column) {
-                const float x = this->host.field_to_world_linear[column];
-                const float y = this->host.field_to_world_linear[3uz + column];
-                const float z = this->host.field_to_world_linear[6uz + column];
+                const float x      = this->host.field_to_world_linear[column];
+                const float y      = this->host.field_to_world_linear[3uz + column];
+                const float z      = this->host.field_to_world_linear[6uz + column];
                 const float extent = std::sqrt(x * x + y * y + z * z);
                 if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"Field domain metric extent is invalid."};
             }
-            this->host.scene_scale = dataset.scene_scale;
-            this->host.near = dataset.near;
-            this->host.far = dataset.far;
-            this->host.phi = dataset.phi;
+            this->host.scene_scale   = dataset.scene_scale;
+            this->host.near          = dataset.near;
+            this->host.far           = dataset.far;
+            this->host.phi           = dataset.phi;
             this->host.rotation_axis = dataset.rotation_axis;
 
             // ====================================================================================================
@@ -78,8 +79,8 @@ namespace hyfluid::train {
                     if (frame_set.frames.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - this->host.frames.size()) throw std::runtime_error{"dynamic dataset contains too many frames."};
 
                     const auto host_frame_set_index = static_cast<std::uint32_t>(this->host.frame_sets.size());
-                    const auto host_frame_offset = static_cast<std::uint32_t>(this->host.frames.size());
-                    const FrameView& first_frame = frame_set.frames.front();
+                    const auto host_frame_offset    = static_cast<std::uint32_t>(this->host.frames.size());
+                    const FrameView& first_frame    = frame_set.frames.front();
                     if (first_frame.width == 0u || first_frame.height == 0u) throw std::runtime_error{std::format("frame set '{}' contains a frame with invalid dimensions.", frame_set.name)};
                     if (first_frame.height > std::numeric_limits<std::uint64_t>::max() / static_cast<std::uint64_t>(first_frame.width) / 4ull) throw std::runtime_error{std::format("frame set '{}' contains an image that is too large.", frame_set.name)};
                     const std::uint64_t frame_pixel_bytes = static_cast<std::uint64_t>(first_frame.width) * static_cast<std::uint64_t>(first_frame.height) * 4ull;
@@ -118,7 +119,7 @@ namespace hyfluid::train {
                         const std::array frame_intrinsics = {frame.focal_x, frame.focal_y, frame.principal_x, frame.principal_y};
                         if (view_reference_seen[frame.view_index] == 0u) {
                             for (std::size_t i = 0uz; i < 12uz; ++i) view_camera[frame.view_index][i] = frame.camera[i];
-                            view_intrinsics[frame.view_index] = frame_intrinsics;
+                            view_intrinsics[frame.view_index]     = frame_intrinsics;
                             view_reference_seen[frame.view_index] = 1u;
                         } else {
                             for (std::size_t i = 0uz; i < 12uz; ++i)
@@ -143,16 +144,16 @@ namespace hyfluid::train {
                         time_indices.push_back(frame.time_index);
                         this->host.frames.push_back(HostFrame{
                             .frame_set_index = host_frame_set_index,
-                            .width = frame.width,
-                            .height = frame.height,
-                            .focal_x = frame.focal_x,
-                            .focal_y = frame.focal_y,
-                            .principal_x = frame.principal_x,
-                            .principal_y = frame.principal_y,
-                            .time = frame.time,
-                            .view_index = frame.view_index,
-                            .time_index = frame.time_index,
-                            .pixel_offset = pixel_offset,
+                            .width           = frame.width,
+                            .height          = frame.height,
+                            .focal_x         = frame.focal_x,
+                            .focal_y         = frame.focal_y,
+                            .principal_x     = frame.principal_x,
+                            .principal_y     = frame.principal_y,
+                            .time            = frame.time,
+                            .view_index      = frame.view_index,
+                            .time_index      = frame.time_index,
+                            .pixel_offset    = pixel_offset,
                         });
                         ++frame_index;
                     }
@@ -164,15 +165,15 @@ namespace hyfluid::train {
                     cuda::upload_dataset(pixels.data(), pixels.size(), camera.data(), camera.size(), intrinsics.data(), intrinsics.size(), times.data(), times.size(), view_indices.data(), view_indices.size(), time_indices.data(), time_indices.size(), frame_indices.data(), frame_indices.size(), device_frame_set.pixels, device_frame_set.camera, device_frame_set.intrinsics, device_frame_set.times, device_frame_set.view_indices, device_frame_set.time_indices, device_frame_set.frame_indices);
 
                     this->host.frame_sets.push_back(HostFrameSet{
-                        .name = std::string{frame_set.name},
-                        .frame_offset = host_frame_offset,
-                        .frame_count = expected_frame_count,
-                        .view_count = frame_set.view_count,
-                        .time_count = frame_set.time_count,
-                        .width = first_frame.width,
-                        .height = first_frame.height,
-                        .pixel_bytes = pixels.size(),
-                        .camera_values = camera.size(),
+                        .name              = std::string{frame_set.name},
+                        .frame_offset      = host_frame_offset,
+                        .frame_count       = expected_frame_count,
+                        .view_count        = frame_set.view_count,
+                        .time_count        = frame_set.time_count,
+                        .width             = first_frame.width,
+                        .height            = first_frame.height,
+                        .pixel_bytes       = pixels.size(),
+                        .camera_values     = camera.size(),
                         .intrinsics_values = intrinsics.size(),
                     });
                 }
@@ -211,15 +212,15 @@ namespace hyfluid::train {
                     ++video_count_by_frame_set[frame_set_index];
 
                     HostVideo host_video{
-                        .frame_set = std::string{video.frame_set},
-                        .file_name = std::string{video.file_name},
+                        .frame_set       = std::string{video.frame_set},
+                        .file_name       = std::string{video.file_name},
                         .frame_set_index = frame_set_index,
-                        .width = video.width,
-                        .height = video.height,
-                        .frame_count = video.frame_count,
-                        .frame_rate = video.frame_rate,
-                        .view_index = video.view_index,
-                        .focal = video.focal,
+                        .width           = video.width,
+                        .height          = video.height,
+                        .frame_count     = video.frame_count,
+                        .frame_rate      = video.frame_rate,
+                        .view_index      = video.view_index,
+                        .focal           = video.focal,
                     };
                     for (std::size_t i = 0uz; i < 12uz; ++i) host_video.camera[i] = video.camera[i];
                     this->host.videos.push_back(std::move(host_video));
@@ -233,9 +234,9 @@ namespace hyfluid::train {
             std::uint64_t evaluation_pixel_capacity = 0ull;
             for (const HostFrameSet& frame_set : this->host.frame_sets) {
                 if (frame_set.width % config::training_image_downsample != 0u || frame_set.height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("frame set '{}' dimensions must be divisible by training image downsample.", frame_set.name)};
-                const std::uint64_t render_width = frame_set.width / config::training_image_downsample;
+                const std::uint64_t render_width  = frame_set.width / config::training_image_downsample;
                 const std::uint64_t render_height = frame_set.height / config::training_image_downsample;
-                evaluation_pixel_capacity = std::max(evaluation_pixel_capacity, render_width * render_height);
+                evaluation_pixel_capacity         = std::max(evaluation_pixel_capacity, render_width * render_height);
             }
             if (evaluation_pixel_capacity == 0ull || evaluation_pixel_capacity > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation render pixel capacity is invalid."};
             this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
@@ -249,12 +250,12 @@ namespace hyfluid::train {
             cuda::allocate_optimizer_buffers(this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
             cuda::allocate_evaluation_buffers(this->host.evaluation_pixel_capacity, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
             cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_occupied_count);
-            this->host.current_step = 0u;
-            this->host.rays_per_batch = config::initial_rays_per_batch;
-            this->host.inference_sample_count = config::network_batch_size;
+            this->host.current_step                            = 0u;
+            this->host.rays_per_batch                          = config::initial_rays_per_batch;
+            this->host.inference_sample_count                  = config::network_batch_size;
             this->host.measured_sample_count_before_compaction = 0u;
-            this->host.measured_sample_count = 0u;
-            this->host.occupancy_grid_occupied_cells = config::nerf_grid_cells;
+            this->host.measured_sample_count                   = 0u;
+            this->host.occupancy_grid_occupied_cells           = config::nerf_grid_cells;
         } catch (...) {
             cuda::destroy_network_handle(this->device.cublaslt_handle);
             cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
@@ -273,22 +274,22 @@ namespace hyfluid::train {
         try {
             if (request.frame_set.empty()) throw std::runtime_error{"optimization frame set must not be empty."};
             if (request.iterations < 1) throw std::runtime_error{"optimization iterations must be positive."};
-            const HostFrameSet* host_frame_set = nullptr;
+            const HostFrameSet* host_frame_set     = nullptr;
             const DeviceFrameSet* device_frame_set = nullptr;
             for (std::size_t frame_set_index = 0uz; frame_set_index < this->host.frame_sets.size(); ++frame_set_index) {
                 if (this->host.frame_sets[frame_set_index].name == request.frame_set) {
-                    host_frame_set = std::addressof(this->host.frame_sets[frame_set_index]);
+                    host_frame_set   = std::addressof(this->host.frame_sets[frame_set_index]);
                     device_frame_set = std::addressof(this->device.frame_sets[frame_set_index]);
                     break;
                 }
             }
             if (host_frame_set == nullptr || device_frame_set == nullptr) throw std::runtime_error{std::format("optimization frame set '{}' is not loaded.", request.frame_set)};
 
-            const auto optimize_start = std::chrono::steady_clock::now();
-            std::uint32_t ray_count = 0u;
-            std::uint32_t sample_count = 0u;
+            const auto optimize_start            = std::chrono::steady_clock::now();
+            std::uint32_t ray_count              = 0u;
+            std::uint32_t sample_count           = 0u;
             std::uint32_t compacted_sample_count = 0u;
-            std::uint32_t loss_value_count = this->host.rays_per_batch;
+            std::uint32_t loss_value_count       = this->host.rays_per_batch;
             for (std::int32_t i = 0; i < request.iterations; ++i) {
                 loss_value_count = this->host.rays_per_batch;
                 cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->host.current_step, this->host.rays_per_batch, this->host.inference_sample_count, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
@@ -305,8 +306,8 @@ namespace hyfluid::train {
                 if (compacted_sample_count > config::network_batch_size) compacted_sample_count = config::network_batch_size;
                 if (ray_count == 0u || sample_count == 0u || compacted_sample_count == 0u) throw std::runtime_error{"HyFluid density training produced an empty batch."};
                 this->host.measured_sample_count_before_compaction = sample_count;
-                this->host.measured_sample_count = compacted_sample_count;
-                this->host.inference_sample_count = ((std::min(sample_count, config::max_samples) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
+                this->host.measured_sample_count                   = compacted_sample_count;
+                this->host.inference_sample_count                  = ((std::min(sample_count, config::max_samples) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
                 if (this->host.inference_sample_count == 0u) this->host.inference_sample_count = config::network_batch_granularity;
                 if (this->host.inference_sample_count > config::network_batch_size) this->host.inference_sample_count = config::network_batch_size;
                 ++this->host.current_step;
@@ -316,17 +317,17 @@ namespace hyfluid::train {
             cuda::read_counter(this->device.occupancy_grid_occupied_count, this->host.occupancy_grid_occupied_cells);
             const float psnr = loss_sum > 0.0f ? -10.0f * std::log10(loss_sum) : std::numeric_limits<float>::infinity();
             return OptimizationStats{
-                .step = this->host.current_step,
-                .rays_per_batch = this->host.rays_per_batch,
-                .ray_count = ray_count,
+                .step                           = this->host.current_step,
+                .rays_per_batch                 = this->host.rays_per_batch,
+                .ray_count                      = ray_count,
                 .sample_count_before_compaction = sample_count,
-                .sample_count = compacted_sample_count,
-                .occupancy_grid_occupied_cells = this->host.occupancy_grid_occupied_cells,
-                .loss = loss_sum,
-                .psnr = psnr,
-                .elapsed_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - optimize_start).count(),
-                .sample_efficiency_ratio = sample_count == 0u ? 0.0f : static_cast<float>(compacted_sample_count) / static_cast<float>(sample_count),
-                .occupancy_grid_ratio = static_cast<float>(this->host.occupancy_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
+                .sample_count                   = compacted_sample_count,
+                .occupancy_grid_occupied_cells  = this->host.occupancy_grid_occupied_cells,
+                .loss                           = loss_sum,
+                .psnr                           = psnr,
+                .elapsed_ms                     = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - optimize_start).count(),
+                .sample_efficiency_ratio        = sample_count == 0u ? 0.0f : static_cast<float>(compacted_sample_count) / static_cast<float>(sample_count),
+                .occupancy_grid_ratio           = static_cast<float>(this->host.occupancy_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
             };
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
@@ -341,11 +342,11 @@ namespace hyfluid::train {
             std::filesystem::create_directories(request.output_dir);
             if (!std::filesystem::is_directory(request.output_dir)) throw std::runtime_error{std::format("failed to create evaluation output directory '{}'.", request.output_dir.string())};
 
-            const HostFrameSet* host_frame_set = nullptr;
+            const HostFrameSet* host_frame_set     = nullptr;
             const DeviceFrameSet* device_frame_set = nullptr;
             for (std::size_t frame_set_index = 0uz; frame_set_index < this->host.frame_sets.size(); ++frame_set_index) {
                 if (this->host.frame_sets[frame_set_index].name == request.frame_set) {
-                    host_frame_set = std::addressof(this->host.frame_sets[frame_set_index]);
+                    host_frame_set   = std::addressof(this->host.frame_sets[frame_set_index]);
                     device_frame_set = std::addressof(this->device.frame_sets[frame_set_index]);
                     break;
                 }
@@ -354,7 +355,7 @@ namespace hyfluid::train {
             if (host_frame_set->view_count == 0u || host_frame_set->time_count == 0u || host_frame_set->frame_count != host_frame_set->view_count * host_frame_set->time_count) throw std::runtime_error{std::format("evaluation frame set '{}' is not a dense view-time grid.", host_frame_set->name)};
             if (host_frame_set->width % config::training_image_downsample != 0u || host_frame_set->height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("evaluation frame set '{}' dimensions are not divisible by training image downsample.", host_frame_set->name)};
 
-            const std::uint32_t render_width = host_frame_set->width / config::training_image_downsample;
+            const std::uint32_t render_width  = host_frame_set->width / config::training_image_downsample;
             const std::uint32_t render_height = host_frame_set->height / config::training_image_downsample;
             if (render_width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) || render_height > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) throw std::runtime_error{"evaluation render dimensions exceed PNG writer limits."};
             const std::uint64_t render_pixels = static_cast<std::uint64_t>(render_width) * render_height;
@@ -364,7 +365,7 @@ namespace hyfluid::train {
 
             const auto evaluation_start = std::chrono::steady_clock::now();
             std::vector<std::uint8_t> evaluation_pixels(static_cast<std::size_t>(render_pixels) * 3uz);
-            double loss_sum = 0.0;
+            double loss_sum                    = 0.0;
             std::uint32_t rendered_image_count = 0u;
             for (std::uint32_t view_index = 0u; view_index < host_frame_set->view_count; ++view_index) {
                 const std::filesystem::path view_output_dir = request.output_dir / std::format("view_{:04}", view_index);
@@ -375,7 +376,7 @@ namespace hyfluid::train {
                     cuda::run_evaluation_image(device_frame_set->pixels, device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, view_index, time_index, this->host.evaluation_pixel_capacity, this->device.occupancy, this->device.params, this->device.sample_coords, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels, evaluation_pixels.data(), image_loss_sum);
                     loss_sum += image_loss_sum;
                     const std::filesystem::path output_path = view_output_dir / std::format("rgb_{:04}.png", time_index);
-                    const std::string output_path_text = output_path.string();
+                    const std::string output_path_text      = output_path.string();
                     if (stbi_write_png(output_path_text.c_str(), static_cast<int>(render_width), static_cast<int>(render_height), 3, evaluation_pixels.data(), static_cast<int>(render_width * 3u)) == 0) throw std::runtime_error{std::format("failed to write evaluation image '{}'.", output_path_text)};
                     ++rendered_image_count;
                 }
@@ -387,17 +388,17 @@ namespace hyfluid::train {
             if (!std::isfinite(mse)) throw std::runtime_error{"evaluation produced non-finite MSE."};
             const float psnr = mse > 0.0 ? static_cast<float>(-10.0 * std::log10(mse)) : std::numeric_limits<float>::infinity();
             EvaluationStats stats{
-                .frame_set = std::string{request.frame_set},
-                .step = this->host.current_step,
-                .render_width = render_width,
-                .render_height = render_height,
-                .image_count = static_cast<std::uint32_t>(image_count),
+                .frame_set            = std::string{request.frame_set},
+                .step                 = this->host.current_step,
+                .render_width         = render_width,
+                .render_height        = render_height,
+                .image_count          = static_cast<std::uint32_t>(image_count),
                 .rendered_image_count = rendered_image_count,
-                .pixel_count = pixel_count,
-                .mse = static_cast<float>(mse),
-                .psnr = psnr,
-                .elapsed_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - evaluation_start).count(),
-                .output_dir = request.output_dir,
+                .pixel_count          = pixel_count,
+                .mse                  = static_cast<float>(mse),
+                .psnr                 = psnr,
+                .elapsed_ms           = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - evaluation_start).count(),
+                .output_dir           = request.output_dir,
             };
 
             const std::filesystem::path metrics_path = request.output_dir / "metrics.json";
@@ -600,9 +601,9 @@ namespace hyfluid::train {
                 const std::int64_t actual_begin_signed = tensor_header.at("data_offsets").at(0uz).get<std::int64_t>();
                 const std::int64_t actual_end_signed   = tensor_header.at("data_offsets").at(1uz).get<std::int64_t>();
                 if (actual_begin_signed < 0 || actual_end_signed < 0) throw std::runtime_error{std::format("safetensors tensor '{}' offsets must be non-negative.", tensor_name)};
-                const auto actual_begin = static_cast<std::uint64_t>(actual_begin_signed);
-                const auto actual_end   = static_cast<std::uint64_t>(actual_end_signed);
-                const std::uint64_t byte_count   = tensor.rows * tensor.cols * sizeof(float);
+                const auto actual_begin        = static_cast<std::uint64_t>(actual_begin_signed);
+                const auto actual_end          = static_cast<std::uint64_t>(actual_end_signed);
+                const std::uint64_t byte_count = tensor.rows * tensor.cols * sizeof(float);
                 if (actual_begin != expected_data_offset || actual_end != actual_begin + byte_count) throw std::runtime_error{std::format("safetensors tensor '{}' data_offsets mismatch.", tensor_name)};
                 expected_data_offset += byte_count;
             }

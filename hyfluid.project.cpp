@@ -33,32 +33,32 @@ import std;
 
 namespace hyfluid::project {
     namespace {
-        constexpr std::uint32_t viewport_depth_tested = 0u;
-        constexpr char section_dataset_id[] = "dataset";
-        constexpr char section_domain_id[] = "domain";
-        constexpr char section_timeline_id[] = "timeline";
-        constexpr char section_field_id[] = "field";
-        constexpr char section_sampler_id[] = "sampler";
-        constexpr char section_diagnostics_id[] = "diagnostics";
-        constexpr char setting_show_field_domain_key[] = "show_field_domain";
-        constexpr char setting_show_active_domain_key[] = "show_active_domain";
-        constexpr char setting_show_volume_key[] = "show_volume";
-        constexpr char setting_show_occupancy_key[] = "show_occupancy";
-        constexpr char setting_occupancy_alpha_key[] = "occupancy_alpha";
+        constexpr std::uint32_t viewport_depth_tested     = 0u;
+        constexpr char section_dataset_id[]               = "dataset";
+        constexpr char section_domain_id[]                = "domain";
+        constexpr char section_timeline_id[]              = "timeline";
+        constexpr char section_field_id[]                 = "field";
+        constexpr char section_sampler_id[]               = "sampler";
+        constexpr char section_diagnostics_id[]           = "diagnostics";
+        constexpr char setting_show_field_domain_key[]    = "show_field_domain";
+        constexpr char setting_show_active_domain_key[]   = "show_active_domain";
+        constexpr char setting_show_volume_key[]          = "show_volume";
+        constexpr char setting_show_occupancy_key[]       = "show_occupancy";
+        constexpr char setting_occupancy_alpha_key[]      = "occupancy_alpha";
         constexpr char setting_occupancy_cell_scale_key[] = "occupancy_cell_scale";
-        constexpr char setting_show_sampler_key[] = "show_sampler";
-        constexpr char setting_show_sampler_points_key[] = "show_sampler_points";
-        constexpr char setting_show_sampler_rays_key[] = "show_sampler_rays";
+        constexpr char setting_show_sampler_key[]         = "show_sampler";
+        constexpr char setting_show_sampler_points_key[]  = "show_sampler_points";
+        constexpr char setting_show_sampler_rays_key[]    = "show_sampler_rays";
         constexpr char setting_sampler_point_radius_key[] = "sampler_point_radius";
-        constexpr char setting_sampler_ray_width_key[] = "sampler_ray_width";
-        constexpr char density_volume_name[] = "HyFluid Density";
-        constexpr char density_material_name[] = "HyFluid Density Material";
-        constexpr char density_light_name[] = "HyFluid Density Key Light";
-        constexpr char sampler_point_cloud_name[] = "HyFluid Sampler Samples";
-        constexpr char sampler_ray_segments_name[] = "HyFluid Sampler Rays";
-        constexpr char sampler_material_name[] = "HyFluid Sampler Point Material";
-        constexpr char field_domain_name[] = "HyFluid Field Domain";
-        constexpr char active_domain_name[] = "HyFluid Active Domain";
+        constexpr char setting_sampler_ray_width_key[]    = "sampler_ray_width";
+        constexpr char density_volume_name[]              = "HyFluid Density";
+        constexpr char density_material_name[]            = "HyFluid Density Material";
+        constexpr char density_light_name[]               = "HyFluid Density Key Light";
+        constexpr char sampler_point_cloud_name[]         = "HyFluid Sampler Samples";
+        constexpr char sampler_ray_segments_name[]        = "HyFluid Sampler Rays";
+        constexpr char sampler_material_name[]            = "HyFluid Sampler Point Material";
+        constexpr char field_domain_name[]                = "HyFluid Field Domain";
+        constexpr char active_domain_name[]               = "HyFluid Active Domain";
 
         struct Vector3 final {
             float x{};
@@ -108,11 +108,11 @@ namespace hyfluid::project {
 
         class ExternalGpuBuffer final {
         public:
-            ExternalGpuBuffer() = default;
-            ExternalGpuBuffer(const ExternalGpuBuffer&) = delete;
-            ExternalGpuBuffer(ExternalGpuBuffer&&) = delete;
+            ExternalGpuBuffer()                                    = default;
+            ExternalGpuBuffer(const ExternalGpuBuffer&)            = delete;
+            ExternalGpuBuffer(ExternalGpuBuffer&&)                 = delete;
             ExternalGpuBuffer& operator=(const ExternalGpuBuffer&) = delete;
-            ExternalGpuBuffer& operator=(ExternalGpuBuffer&&) = delete;
+            ExternalGpuBuffer& operator=(ExternalGpuBuffer&&)      = delete;
             ~ExternalGpuBuffer() noexcept;
 
             void ensure(std::shared_ptr<plugin::HostServices> host_services, std::uint32_t kind, std::uint64_t requested_byte_size, std::string_view debug_name, std::string_view label);
@@ -136,8 +136,8 @@ namespace hyfluid::project {
 
         [[nodiscard]] float parse_float(const std::string& text, const std::string_view name) {
             float value{};
-            const char* const begin = text.data();
-            const char* const end = text.data() + text.size();
+            const char* const begin             = text.data();
+            const char* const end               = text.data() + text.size();
             const std::from_chars_result result = std::from_chars(begin, end, value);
             if (result.ec != std::errc{} || result.ptr != end || !std::isfinite(value)) throw std::runtime_error{std::format("{} must be a finite float.", name)};
             return value;
@@ -145,8 +145,8 @@ namespace hyfluid::project {
 
         [[nodiscard]] std::uint64_t parse_u64(const std::string& text, const std::string_view name) {
             std::uint64_t value{};
-            const char* const begin = text.data();
-            const char* const end = text.data() + text.size();
+            const char* const begin             = text.data();
+            const char* const end               = text.data() + text.size();
             const std::from_chars_result result = std::from_chars(begin, end, value);
             if (result.ec != std::errc{} || result.ptr != end) throw std::runtime_error{std::format("{} must be an unsigned integer.", name)};
             return value;
@@ -158,7 +158,7 @@ namespace hyfluid::project {
             std::set<std::string> seen;
             std::size_t offset{};
             while (offset <= text.size()) {
-                const std::size_t comma = text.find(',', offset);
+                const std::size_t comma     = text.find(',', offset);
                 const std::string frame_set = comma == std::string::npos ? text.substr(offset) : text.substr(offset, comma - offset);
                 if (frame_set != "train" && frame_set != "test") throw std::runtime_error{std::format("frame_sets contains unknown ScalarReal frame set '{}'.", frame_set)};
                 if (!seen.insert(frame_set).second) throw std::runtime_error{std::format("frame_sets contains duplicate frame set '{}'.", frame_set)};
@@ -176,12 +176,18 @@ namespace hyfluid::project {
             std::set<std::string> seen_options;
             for (const plugin::Option& option : options) {
                 if (!seen_options.insert(option.key).second) throw std::runtime_error{std::format("scene plugin open option '{}' is duplicated.", option.key)};
-                if (option.key == "dataset") dataset_option = option.value;
-                else if (option.key == "frame_sets") parsed.frame_sets = parse_frame_sets(option.value);
-                else if (option.key == "scene_scale") parsed.scene_scale = parse_float(option.value, "scene_scale");
-                else if (option.key == "view_stride") parsed.view_stride = parse_u64(option.value, "view_stride");
-                else if (option.key == "max_views") parsed.max_views = parse_u64(option.value, "max_views");
-                else throw std::runtime_error{std::format("unknown HyFluid project open option '{}'.", option.key)};
+                if (option.key == "dataset")
+                    dataset_option = option.value;
+                else if (option.key == "frame_sets")
+                    parsed.frame_sets = parse_frame_sets(option.value);
+                else if (option.key == "scene_scale")
+                    parsed.scene_scale = parse_float(option.value, "scene_scale");
+                else if (option.key == "view_stride")
+                    parsed.view_stride = parse_u64(option.value, "view_stride");
+                else if (option.key == "max_views")
+                    parsed.max_views = parse_u64(option.value, "max_views");
+                else
+                    throw std::runtime_error{std::format("unknown HyFluid project open option '{}'.", option.key)};
             }
             if (!dataset_option.has_value() || dataset_option->empty()) throw std::runtime_error{"dataset option is required."};
             parsed.dataset_path = std::filesystem::absolute(std::filesystem::path{*dataset_option}).lexically_normal();
@@ -229,37 +235,37 @@ namespace hyfluid::project {
         }
 
         [[nodiscard]] CameraBasis spectra_image_down_camera_basis(Vector3 right, Vector3 down, Vector3 forward, const std::string_view context) {
-            right = normalize(right, std::format("{} right", context));
-            down = normalize(down, std::format("{} down", context));
+            right   = normalize(right, std::format("{} right", context));
+            down    = normalize(down, std::format("{} down", context));
             forward = normalize(forward, std::format("{} forward", context));
             if (std::abs(dot(right, down)) > 1.0e-3f) throw std::runtime_error{std::format("{} right/down axes are not orthogonal.", context)};
             if (std::abs(dot(right, forward)) > 1.0e-3f) throw std::runtime_error{std::format("{} right/forward axes are not orthogonal.", context)};
             if (std::abs(dot(down, forward)) > 1.0e-3f) throw std::runtime_error{std::format("{} down/forward axes are not orthogonal.", context)};
             if (dot(cross(right, down), forward) <= 0.0f) throw std::runtime_error{std::format("{} basis must satisfy cross(right, down) == forward in Spectra image-down camera space.", context)};
             return CameraBasis{
-                .right = right,
-                .down = down,
+                .right   = right,
+                .down    = down,
                 .forward = forward,
             };
         }
 
         [[nodiscard]] CameraBasis nearest_spectra_image_down_camera_basis(const Vector3 right, const Vector3 down, const Vector3 forward, const std::string_view context) {
             CameraBasis basis{
-                .right = scalar_real_normalized_to_spectra(right),
-                .down = scalar_real_normalized_to_spectra(down),
+                .right   = scalar_real_normalized_to_spectra(right),
+                .down    = scalar_real_normalized_to_spectra(down),
                 .forward = scalar_real_normalized_to_spectra(forward),
             };
 
             for (std::uint32_t iteration = 0u; iteration < 8u; ++iteration) {
                 const float determinant = dot(cross(basis.right, basis.down), basis.forward);
                 if (!std::isfinite(determinant) || determinant <= 1.0e-8f) throw std::runtime_error{std::format("{} ScalarReal camera transform must become right-handed after SpectraYUp mapping.", context)};
-                const Vector3 inverse_transpose_right = multiply(cross(basis.down, basis.forward), 1.0f / determinant);
-                const Vector3 inverse_transpose_down = multiply(cross(basis.forward, basis.right), 1.0f / determinant);
+                const Vector3 inverse_transpose_right   = multiply(cross(basis.down, basis.forward), 1.0f / determinant);
+                const Vector3 inverse_transpose_down    = multiply(cross(basis.forward, basis.right), 1.0f / determinant);
                 const Vector3 inverse_transpose_forward = multiply(cross(basis.right, basis.down), 1.0f / determinant);
-                basis = CameraBasis{
-                    .right = multiply(add(basis.right, inverse_transpose_right), 0.5f),
-                    .down = multiply(add(basis.down, inverse_transpose_down), 0.5f),
-                    .forward = multiply(add(basis.forward, inverse_transpose_forward), 0.5f),
+                basis                                   = CameraBasis{
+                                                      .right   = multiply(add(basis.right, inverse_transpose_right), 0.5f),
+                                                      .down    = multiply(add(basis.down, inverse_transpose_down), 0.5f),
+                                                      .forward = multiply(add(basis.forward, inverse_transpose_forward), 0.5f),
                 };
             }
 
@@ -279,21 +285,21 @@ namespace hyfluid::project {
             constexpr Vector3 overview_target{0.5f, 0.5f, 0.5f};
             constexpr Vector3 overview_eye{0.5f, 1.55f, 2.65f};
             constexpr Vector3 overview_up{0.0f, 1.0f, 0.0f};
-            const Vector3 overview_forward = normalize(subtract(overview_target, overview_eye), "overview camera forward");
-            const Vector3 overview_down = multiply(overview_up, -1.0f);
-            const Vector3 overview_right = normalize(cross(overview_down, overview_forward), "overview camera right");
+            const Vector3 overview_forward     = normalize(subtract(overview_target, overview_eye), "overview camera forward");
+            const Vector3 overview_down        = multiply(overview_up, -1.0f);
+            const Vector3 overview_right       = normalize(cross(overview_down, overview_forward), "overview camera right");
             const Vector3 overview_camera_down = cross(overview_forward, overview_right);
-            const CameraBasis basis = spectra_image_down_camera_basis(overview_right, overview_camera_down, overview_forward, "overview camera");
+            const CameraBasis basis            = spectra_image_down_camera_basis(overview_right, overview_camera_down, overview_forward, "overview camera");
             return plugin::Camera{
-                .name = "Overview",
-                .position = array_from(overview_eye),
-                .right = array_from(basis.right),
-                .down = array_from(basis.down),
-                .forward = array_from(basis.forward),
-                .projection = plugin::CameraProjection::Perspective,
+                .name                 = "Overview",
+                .position             = array_from(overview_eye),
+                .right                = array_from(basis.right),
+                .down                 = array_from(basis.down),
+                .forward              = array_from(basis.forward),
+                .projection           = plugin::CameraProjection::Perspective,
                 .vertical_fov_degrees = 45.0f,
-                .near_plane = 0.01f,
-                .far_plane = 20.0f,
+                .near_plane           = 0.01f,
+                .far_plane            = 20.0f,
             };
         }
 
@@ -301,34 +307,35 @@ namespace hyfluid::project {
             const Vector3 camera_x{frame.camera.at(0u), frame.camera.at(1u), frame.camera.at(2u)};
             const Vector3 camera_y{frame.camera.at(3u), frame.camera.at(4u), frame.camera.at(5u)};
             const Vector3 camera_z{frame.camera.at(6u), frame.camera.at(7u), frame.camera.at(8u)};
-            const Vector3 origin = scalar_real_normalized_to_spectra(Vector3{frame.camera.at(9u), frame.camera.at(10u), frame.camera.at(11u)});
-            const CameraBasis basis = nearest_spectra_image_down_camera_basis(camera_x, camera_y, camera_z, std::format("dataset camera '{}'", name));
+            const Vector3 origin               = scalar_real_normalized_to_spectra(Vector3{frame.camera.at(9u), frame.camera.at(10u), frame.camera.at(11u)});
+            const CameraBasis basis            = nearest_spectra_image_down_camera_basis(camera_x, camera_y, camera_z, std::format("dataset camera '{}'", name));
             const std::uint64_t expected_bytes = static_cast<std::uint64_t>(frame.width) * static_cast<std::uint64_t>(frame.height) * 4u;
             if (frame.width == 0u || frame.height == 0u) throw std::runtime_error{std::format("dataset camera '{}' image dimensions must be non-zero.", name)};
             if (frame.rgba.size() != expected_bytes) throw std::runtime_error{std::format("dataset camera '{}' image byte count does not match width * height * 4.", name)};
             return plugin::Camera{
-                .name = name,
-                .position = array_from(origin),
-                .right = array_from(basis.right),
-                .down = array_from(basis.down),
-                .forward = array_from(basis.forward),
-                .projection = plugin::CameraProjection::Pinhole,
+                .name                 = name,
+                .position             = array_from(origin),
+                .right                = array_from(basis.right),
+                .down                 = array_from(basis.down),
+                .forward              = array_from(basis.forward),
+                .projection           = plugin::CameraProjection::Pinhole,
                 .vertical_fov_degrees = 45.0f,
-                .image_width = frame.width,
-                .image_height = frame.height,
-                .fx = frame.focal_x,
-                .fy = frame.focal_y,
-                .cx = frame.principal_x,
-                .cy = frame.principal_y,
-                .near_plane = near_plane,
-                .far_plane = far_plane,
-                .image = plugin::CameraImage{
-                    .rgba8 = frame.rgba.data(),
-                    .rgba8_size = expected_bytes,
-                    .revision = static_cast<std::uint64_t>(frame.time_index) + 1u,
-                    .width = frame.width,
-                    .height = frame.height,
-                },
+                .image_width          = frame.width,
+                .image_height         = frame.height,
+                .fx                   = frame.focal_x,
+                .fy                   = frame.focal_y,
+                .cx                   = frame.principal_x,
+                .cy                   = frame.principal_y,
+                .near_plane           = near_plane,
+                .far_plane            = far_plane,
+                .image =
+                    plugin::CameraImage{
+                        .rgba8      = frame.rgba.data(),
+                        .rgba8_size = expected_bytes,
+                        .revision   = static_cast<std::uint64_t>(frame.time_index) + 1u,
+                        .width      = frame.width,
+                        .height     = frame.height,
+                    },
             };
         }
 
@@ -368,7 +375,7 @@ namespace hyfluid::project {
             }
 #endif
         }
-    }
+    } // namespace
 
     struct Project::State final {
         DatasetOptions dataset_options;
@@ -421,7 +428,7 @@ namespace hyfluid::project {
             }
         }
         this->allocation = plugin::GpuBufferAllocation{};
-        this->byte_size = 0u;
+        this->byte_size  = 0u;
         this->host_services.reset();
     }
 
@@ -459,18 +466,17 @@ namespace hyfluid::project {
             memory_desc.size = next_allocation.byte_size;
             switch (next_allocation.handle_kind) {
 #if defined(_WIN32)
-                case plugin::GpuResourceHandleKind::OpaqueWin32:
-                    memory_desc.type = cudaExternalMemoryHandleTypeOpaqueWin32;
-                    memory_desc.handle.win32.handle = reinterpret_cast<void*>(next_allocation.handle);
-                    break;
+            case plugin::GpuResourceHandleKind::OpaqueWin32:
+                memory_desc.type                = cudaExternalMemoryHandleTypeOpaqueWin32;
+                memory_desc.handle.win32.handle = reinterpret_cast<void*>(next_allocation.handle);
+                break;
 #else
-                case plugin::GpuResourceHandleKind::OpaqueFileDescriptor:
-                    memory_desc.type = cudaExternalMemoryHandleTypeOpaqueFd;
-                    memory_desc.handle.fd = static_cast<int>(next_allocation.handle);
-                    break;
+            case plugin::GpuResourceHandleKind::OpaqueFileDescriptor:
+                memory_desc.type      = cudaExternalMemoryHandleTypeOpaqueFd;
+                memory_desc.handle.fd = static_cast<int>(next_allocation.handle);
+                break;
 #endif
-                default:
-                    throw std::runtime_error{std::format("Spectra returned an unsupported {} external memory handle kind.", label)};
+            default: throw std::runtime_error{std::format("Spectra returned an unsupported {} external memory handle kind.", label)};
             }
 
             cudaExternalMemory_t imported_memory{};
@@ -479,7 +485,7 @@ namespace hyfluid::project {
             if (import_status != cudaSuccess) throw std::runtime_error{std::format("cudaImportExternalMemory for {} failed: {}", label, cudaGetErrorString(import_status))};
 
             cudaExternalMemoryBufferDesc buffer_desc{};
-            buffer_desc.size = next_allocation.byte_size;
+            buffer_desc.size         = next_allocation.byte_size;
             void* next_mapped_buffer = nullptr;
             if (const cudaError_t status = cudaExternalMemoryGetMappedBuffer(&next_mapped_buffer, imported_memory, &buffer_desc); status != cudaSuccess) {
                 static_cast<void>(cudaDestroyExternalMemory(imported_memory));
@@ -489,11 +495,11 @@ namespace hyfluid::project {
                 static_cast<void>(cudaDestroyExternalMemory(imported_memory));
                 throw std::runtime_error{std::format("cudaExternalMemoryGetMappedBuffer returned null for {}.", label)};
             }
-            this->host_services = std::move(next_host_services);
-            this->allocation = next_allocation;
+            this->host_services   = std::move(next_host_services);
+            this->allocation      = next_allocation;
             this->external_memory = imported_memory;
-            this->mapped_buffer = next_mapped_buffer;
-            this->byte_size = requested_byte_size;
+            this->mapped_buffer   = next_mapped_buffer;
+            this->byte_size       = requested_byte_size;
         } catch (...) {
             if (next_allocation.handle != 0u) close_imported_handle(next_allocation);
             next_host_services->release_gpu_buffer(next_allocation.resource_id);
@@ -509,14 +515,14 @@ namespace hyfluid::project {
         [[nodiscard]] plugin::ViewportSegment segment(const std::array<float, 3u>& start, const std::array<float, 3u>& end) {
             return plugin::ViewportSegment{
                 .start = start,
-                .end = end,
+                .end   = end,
             };
         }
 
         [[nodiscard]] plugin::ViewportSegmentSet domain_box(std::string name, const std::array<float, 3u>& field_min, const std::array<float, 3u>& field_max, const std::array<float, 4u>& color, const float width) {
             const std::array<float, 3u> minimum = field_to_scene_point(field_min);
             const std::array<float, 3u> maximum = field_to_scene_point(field_max);
-            const std::array corners = {
+            const std::array corners            = {
                 std::array{minimum[0u], minimum[1u], minimum[2u]},
                 std::array{maximum[0u], minimum[1u], minimum[2u]},
                 std::array{maximum[0u], maximum[1u], minimum[2u]},
@@ -527,51 +533,50 @@ namespace hyfluid::project {
                 std::array{minimum[0u], maximum[1u], maximum[2u]},
             };
             return plugin::ViewportSegmentSet{
-                .name = std::move(name),
+                .name  = std::move(name),
                 .owner = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::Camera, .name = "Overview"},
-                .segments = {
-                    segment(corners[0u], corners[1u]),
-                    segment(corners[1u], corners[2u]),
-                    segment(corners[2u], corners[3u]),
-                    segment(corners[3u], corners[0u]),
-                    segment(corners[4u], corners[5u]),
-                    segment(corners[5u], corners[6u]),
-                    segment(corners[6u], corners[7u]),
-                    segment(corners[7u], corners[4u]),
-                    segment(corners[0u], corners[4u]),
-                    segment(corners[1u], corners[5u]),
-                    segment(corners[2u], corners[6u]),
-                    segment(corners[3u], corners[7u]),
-                },
-                .colors = {
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                    plugin::Color{.value = color},
-                },
+                .segments =
+                    {
+                        segment(corners[0u], corners[1u]),
+                        segment(corners[1u], corners[2u]),
+                        segment(corners[2u], corners[3u]),
+                        segment(corners[3u], corners[0u]),
+                        segment(corners[4u], corners[5u]),
+                        segment(corners[5u], corners[6u]),
+                        segment(corners[6u], corners[7u]),
+                        segment(corners[7u], corners[4u]),
+                        segment(corners[0u], corners[4u]),
+                        segment(corners[1u], corners[5u]),
+                        segment(corners[2u], corners[6u]),
+                        segment(corners[3u], corners[7u]),
+                    },
+                .colors =
+                    {
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                        plugin::Color{.value = color},
+                    },
                 .source_kind = plugin::ViewportSegmentSourceKind::Values,
-                .width = width,
-                .width_mode = plugin::ViewportSegmentWidthMode::Screen,
-                .depth_mode = plugin::ViewportSegmentDepthMode::Overlay,
+                .width       = width,
+                .width_mode  = plugin::ViewportSegmentWidthMode::Screen,
+                .depth_mode  = plugin::ViewportSegmentDepthMode::Overlay,
             };
         }
 
         [[nodiscard]] std::string_view occupancy_state_label(const inspector::OccupancyGridState state) {
             switch (state) {
-            case inspector::OccupancyGridState::Full:
-                return "full";
-            case inspector::OccupancyGridState::Static:
-                return "static";
-            case inspector::OccupancyGridState::Learned:
-                return "learned";
+            case inspector::OccupancyGridState::Full: return "full";
+            case inspector::OccupancyGridState::Static: return "static";
+            case inspector::OccupancyGridState::Learned: return "learned";
             }
             throw std::runtime_error{"unknown HyFluid occupancy grid state."};
         }
@@ -616,7 +621,7 @@ namespace hyfluid::project {
         void reset_density_visualization(Project::State& state, const bool release_buffer) noexcept {
             state.density_volume.reset();
             state.latest_density_stats.reset();
-            state.exported_density_revision = 0u;
+            state.exported_density_revision  = 0u;
             state.exported_density_byte_size = 0u;
             reset_occupancy_visualization(state, false);
             if (release_buffer) state.density_buffer.reset();
@@ -639,7 +644,7 @@ namespace hyfluid::project {
             if (dimension > std::numeric_limits<std::uint64_t>::max() / dimension / dimension) throw std::runtime_error{"HyFluid density slice dimensions overflow cell count."};
             const std::uint64_t cell_count = dimension * dimension * dimension;
             if (cell_count > std::numeric_limits<std::uint64_t>::max() / sizeof(float)) throw std::runtime_error{"HyFluid density slice byte size overflows uint64."};
-            const std::uint64_t byte_size = cell_count * sizeof(float);
+            const std::uint64_t byte_size         = cell_count * sizeof(float);
             const std::uint64_t expected_revision = (static_cast<std::uint64_t>(state.latest_stats->step) << 32u) | timeline_frame_index;
             if (state.density_volume.has_value() && state.exported_density_revision == expected_revision) return;
 
@@ -650,12 +655,12 @@ namespace hyfluid::project {
             const inspector::Inspector inspector{*state.trainer};
             const std::array dimensions{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension};
             const std::expected<inspector::DensitySliceSampleStats, std::string> stats = inspector.sample_density_slice(inspector::DensitySliceSampleRequest{
-                .dimensions = dimensions,
-                .time_count = static_cast<std::uint32_t>(state.timeline_frame_count),
-                .time_index = static_cast<std::uint32_t>(timeline_frame_index),
+                .dimensions     = dimensions,
+                .time_count     = static_cast<std::uint32_t>(state.timeline_frame_count),
+                .time_index     = static_cast<std::uint32_t>(timeline_frame_index),
                 .output_density = density_values,
-                .byte_size = byte_size,
-                .encoding = inspector::DensitySliceEncoding::MortonFloat32,
+                .byte_size      = byte_size,
+                .encoding       = inspector::DensitySliceEncoding::MortonFloat32,
             });
             if (!stats) throw std::runtime_error{stats.error()};
             if (stats->dimensions != dimensions) throw std::runtime_error{"HyFluid density slice returned unexpected dimensions."};
@@ -664,30 +669,32 @@ namespace hyfluid::project {
             state.latest_density_stats = *stats;
 
             state.density_volume = plugin::VolumeGrid{
-                .name = density_volume_name,
+                .name       = density_volume_name,
                 .dimensions = dimensions,
-                .origin = {0.0f, 0.0f, 0.0f},
-                .voxel_size = {
-                    1.0f / static_cast<float>(dimensions[0u]),
-                    1.0f / static_cast<float>(dimensions[1u]),
-                    1.0f / static_cast<float>(dimensions[2u]),
-                },
-                .channels = {
-                    plugin::VolumeChannel{
-                        .name = "density",
-                        .dimensions = dimensions,
-                        .format = plugin::VolumeChannelFormat::Float32,
-                        .source_kind = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
-                        .index_encoding = plugin::VolumeChannelIndexEncoding::Morton3D,
-                        .buffer_id = state.density_buffer.resource_id(),
-                        .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
-                        .source_byte_size = stats->byte_size,
-                        .revision = stats->revision,
+                .origin     = {0.0f, 0.0f, 0.0f},
+                .voxel_size =
+                    {
+                        1.0f / static_cast<float>(dimensions[0u]),
+                        1.0f / static_cast<float>(dimensions[1u]),
+                        1.0f / static_cast<float>(dimensions[2u]),
                     },
-                },
+                .channels =
+                    {
+                        plugin::VolumeChannel{
+                            .name                    = "density",
+                            .dimensions              = dimensions,
+                            .format                  = plugin::VolumeChannelFormat::Float32,
+                            .source_kind             = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
+                            .index_encoding          = plugin::VolumeChannelIndexEncoding::Morton3D,
+                            .buffer_id               = state.density_buffer.resource_id(),
+                            .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
+                            .source_byte_size        = stats->byte_size,
+                            .revision                = stats->revision,
+                        },
+                    },
                 .material_name = density_material_name,
             };
-            state.exported_density_revision = stats->revision;
+            state.exported_density_revision  = stats->revision;
             state.exported_density_byte_size = stats->byte_size;
         }
 
@@ -708,7 +715,7 @@ namespace hyfluid::project {
             if (view.bitfield_bytes % sizeof(std::uint32_t) != 0u) throw std::runtime_error{"HyFluid occupancy grid bitfield byte size must be uint32 aligned for Spectra visualization."};
             if (view.dimensions != std::array{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension}) throw std::runtime_error{"HyFluid occupancy grid dimensions do not match density slice dimensions."};
             if (state.exported_occupancy_revision == view.revision && state.occupancy_grid.has_value()) {
-                state.occupancy_grid->color = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha};
+                state.occupancy_grid->color      = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha};
                 state.occupancy_grid->cell_scale = state.debug.occupancy_cell_scale;
                 rebuild_debug_attachments(state);
                 return;
@@ -720,22 +727,22 @@ namespace hyfluid::project {
             if (const cudaError_t status = cudaMemcpy(occupancy_bitfield, view.bitfield, view.bitfield_bytes, cudaMemcpyDeviceToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy HyFluid occupancy grid bitfield failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaDeviceSynchronize(); status != cudaSuccess) throw std::runtime_error{std::string{"cudaDeviceSynchronize after HyFluid occupancy grid export failed: "} + cudaGetErrorString(status)};
 
-            const float voxel_size = 1.0f / static_cast<float>(view.dimensions[0u]);
+            const float voxel_size            = 1.0f / static_cast<float>(view.dimensions[0u]);
             state.exported_occupancy_revision = view.revision;
-            state.occupancy_grid = plugin::ViewportVoxelGrid{
-                .name = "HyFluid Occupancy Grid",
-                .owner = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::VolumeGrid, .name = density_volume_name},
-                .dimensions = view.dimensions,
-                .origin = {0.0f, 0.0f, 0.0f},
-                .voxel_size = {voxel_size, voxel_size, voxel_size},
-                .color = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha},
-                .cell_scale = state.debug.occupancy_cell_scale,
-                .depth_mode = viewport_depth_tested,
-                .source_kind = plugin::ViewportVoxelGridSourceKind::Bitfield,
-                .index_encoding = plugin::ViewportVoxelGridIndexEncoding::Morton3D,
-                .buffer_id = state.occupancy_buffer.resource_id(),
-                .source_byte_size = view.bitfield_bytes,
-                .revision = view.revision,
+            state.occupancy_grid              = plugin::ViewportVoxelGrid{
+                             .name             = "HyFluid Occupancy Grid",
+                             .owner            = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::VolumeGrid, .name = density_volume_name},
+                             .dimensions       = view.dimensions,
+                             .origin           = {0.0f, 0.0f, 0.0f},
+                             .voxel_size       = {voxel_size, voxel_size, voxel_size},
+                             .color            = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha},
+                             .cell_scale       = state.debug.occupancy_cell_scale,
+                             .depth_mode       = viewport_depth_tested,
+                             .source_kind      = plugin::ViewportVoxelGridSourceKind::Bitfield,
+                             .index_encoding   = plugin::ViewportVoxelGridIndexEncoding::Morton3D,
+                             .buffer_id        = state.occupancy_buffer.resource_id(),
+                             .source_byte_size = view.bitfield_bytes,
+                             .revision         = view.revision,
             };
             rebuild_debug_attachments(state);
         }
@@ -743,9 +750,9 @@ namespace hyfluid::project {
         void reset_sampler_visualization(Project::State& state, const bool release_buffers) noexcept {
             state.sampler_point_cloud.reset();
             state.sampler_ray_segments.reset();
-            state.exported_sampler_revision = 0u;
+            state.exported_sampler_revision    = 0u;
             state.exported_sampler_point_count = 0u;
-            state.exported_sampler_ray_count = 0u;
+            state.exported_sampler_ray_count   = 0u;
             if (release_buffers) {
                 state.sampler_points_buffer.reset();
                 state.sampler_segments_buffer.reset();
@@ -769,11 +776,11 @@ namespace hyfluid::project {
             if (view.sample_count > std::numeric_limits<std::uint64_t>::max() / inspector::SamplerPointInstanceBytes) throw std::runtime_error{"HyFluid sampler point visualization byte size overflows uint64."};
             if (view.ray_count > std::numeric_limits<std::uint64_t>::max() / inspector::SamplerSegmentInstanceBytes) throw std::runtime_error{"HyFluid sampler ray visualization byte size overflows uint64."};
 
-            const std::uint64_t point_byte_size = static_cast<std::uint64_t>(view.sample_count) * inspector::SamplerPointInstanceBytes;
+            const std::uint64_t point_byte_size   = static_cast<std::uint64_t>(view.sample_count) * inspector::SamplerPointInstanceBytes;
             const std::uint64_t segment_byte_size = static_cast<std::uint64_t>(view.ray_count) * inspector::SamplerSegmentInstanceBytes;
             if (state.timeline_frame_count == 0u || state.timeline_frame_count > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"HyFluid sampler visualization timeline frame count is invalid."};
             if (timeline_frame_index >= state.timeline_frame_count) throw std::runtime_error{"HyFluid sampler visualization frame index is outside timeline."};
-            std::byte* point_instances = nullptr;
+            std::byte* point_instances   = nullptr;
             std::byte* segment_instances = nullptr;
             std::uint64_t requested_point_bytes{};
             std::uint64_t requested_segment_bytes{};
@@ -800,122 +807,126 @@ namespace hyfluid::project {
             }
 
             const std::expected<inspector::SamplerVisualizationStats, std::string> stats = inspector.write_sampler_visualization(inspector::SamplerVisualizationRequest{
-                .point_instances = point_instances,
-                .point_byte_size = requested_point_bytes,
+                .point_instances   = point_instances,
+                .point_byte_size   = requested_point_bytes,
                 .segment_instances = segment_instances,
                 .segment_byte_size = requested_segment_bytes,
-                .time_count = static_cast<std::uint32_t>(state.timeline_frame_count),
-                .time_index = static_cast<std::uint32_t>(timeline_frame_index),
-                .point_radius = state.debug.sampler_point_radius,
-                .ray_width = state.debug.sampler_ray_width,
-                .width_mode = static_cast<std::uint32_t>(plugin::ViewportSegmentWidthMode::Screen),
+                .time_count        = static_cast<std::uint32_t>(state.timeline_frame_count),
+                .time_index        = static_cast<std::uint32_t>(timeline_frame_index),
+                .point_radius      = state.debug.sampler_point_radius,
+                .ray_width         = state.debug.sampler_ray_width,
+                .width_mode        = static_cast<std::uint32_t>(plugin::ViewportSegmentWidthMode::Screen),
             });
             if (!stats) throw std::runtime_error(stats.error());
 
-            state.exported_sampler_revision = stats->revision;
+            state.exported_sampler_revision    = stats->revision;
             state.exported_sampler_point_count = needs_point_cloud ? stats->point_count : 0u;
-            state.exported_sampler_ray_count = state.debug.show_sampler_rays ? stats->ray_count : 0u;
+            state.exported_sampler_ray_count   = state.debug.show_sampler_rays ? stats->ray_count : 0u;
             state.sampler_point_cloud.reset();
             state.sampler_ray_segments.reset();
             if (needs_point_cloud && stats->point_count != 0u) {
                 state.sampler_point_cloud = plugin::PointCloud{
-                    .name = sampler_point_cloud_name,
-                    .source_kind = plugin::PointCloudSourceKind::ExternalGpuBuffer,
-                    .point_count = stats->point_count,
-                    .buffer_id = state.sampler_points_buffer.resource_id(),
+                    .name             = sampler_point_cloud_name,
+                    .source_kind      = plugin::PointCloudSourceKind::ExternalGpuBuffer,
+                    .point_count      = stats->point_count,
+                    .buffer_id        = state.sampler_points_buffer.resource_id(),
                     .source_byte_size = stats->point_byte_size,
-                    .revision = stats->revision,
-                    .material_name = sampler_material_name,
-                    .transform = {},
-                    .bounds = plugin::Bounds{
-                        .minimum = {0.0f, 0.0f, 0.0f},
-                        .maximum = {1.0f, 1.0f, 1.0f},
-                    },
+                    .revision         = stats->revision,
+                    .material_name    = sampler_material_name,
+                    .transform        = {},
+                    .bounds =
+                        plugin::Bounds{
+                            .minimum = {0.0f, 0.0f, 0.0f},
+                            .maximum = {1.0f, 1.0f, 1.0f},
+                        },
                 };
             }
             if (state.debug.show_sampler_rays && stats->ray_count != 0u) {
                 state.sampler_ray_segments = plugin::ViewportSegmentSet{
-                    .name = sampler_ray_segments_name,
-                    .owner = state.sampler_point_cloud.has_value() ? plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::PointCloud, .name = sampler_point_cloud_name} : plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::Camera, .name = "Overview"},
-                    .source_kind = plugin::ViewportSegmentSourceKind::ExternalGpuBuffer,
-                    .segment_count = stats->ray_count,
-                    .buffer_id = state.sampler_segments_buffer.resource_id(),
+                    .name             = sampler_ray_segments_name,
+                    .owner            = state.sampler_point_cloud.has_value() ? plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::PointCloud, .name = sampler_point_cloud_name} : plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::Camera, .name = "Overview"},
+                    .source_kind      = plugin::ViewportSegmentSourceKind::ExternalGpuBuffer,
+                    .segment_count    = stats->ray_count,
+                    .buffer_id        = state.sampler_segments_buffer.resource_id(),
                     .source_byte_size = stats->segment_byte_size,
-                    .revision = stats->revision,
-                    .width = state.debug.sampler_ray_width,
-                    .width_mode = plugin::ViewportSegmentWidthMode::Screen,
-                    .depth_mode = plugin::ViewportSegmentDepthMode::DepthTested,
+                    .revision         = stats->revision,
+                    .width            = state.debug.sampler_ray_width,
+                    .width_mode       = plugin::ViewportSegmentWidthMode::Screen,
+                    .depth_mode       = plugin::ViewportSegmentDepthMode::DepthTested,
                 };
             }
 
             rebuild_debug_attachments(state);
         }
-    }
+    } // namespace
 
     Project::Project(std::unique_ptr<State> state) : state(std::move(state)) {}
-    Project::Project(Project&& other) noexcept = default;
+    Project::Project(Project&& other) noexcept            = default;
     Project& Project::operator=(Project&& other) noexcept = default;
-    Project::~Project() noexcept = default;
+    Project::~Project() noexcept                          = default;
 
     const plugin::PluginDefinition<Project>& Project::plugin() {
         static const plugin::PluginDefinition<Project> definition{
-            .id = "hyfluid.project",
-            .title = "HyFluid Project",
+            .id                = "hyfluid.project",
+            .title             = "HyFluid Project",
             .open_action_label = "Open Dataset",
-            .sections = {
-                plugin::section(section_dataset_id, "Dataset"),
-                plugin::section(section_domain_id, "Domain"),
-                plugin::section(section_timeline_id, "Timeline"),
-                plugin::section(section_field_id, "Field"),
-                plugin::section(section_sampler_id, "Sampler"),
-                plugin::section(section_diagnostics_id, "Diagnostics"),
-            },
-            .open_options = {
-                plugin::directory("dataset", "Dataset").describe("ScalarReal dataset root directory.").section(section_dataset_id).defaulted(R"(C:\Users\xayah\Desktop\hyfluid-dev\data\ScalarReal)").required(),
-                plugin::text("frame_sets", "Frame Sets").describe("Comma-separated ScalarReal frame sets: train,test.").section(section_dataset_id).defaulted("train"),
-                plugin::float_option("scene_scale", "Scene Scale", 1.0f).describe("ScalarReal scene scale passed to the dataset loader.").section(section_dataset_id),
-                plugin::unsigned_integer("view_stride", "View Stride", 1u).describe("Only every Nth view is visualized.").section(section_dataset_id),
-                plugin::unsigned_integer("max_views", "Max Views", 0u).describe("0 means no view count limit.").section(section_dataset_id),
-            },
-            .settings = {
-                plugin::toggle(setting_show_field_domain_key, "Show Field Domain", true, &Project::set_show_field_domain).section(section_domain_id),
-                plugin::toggle(setting_show_active_domain_key, "Show Active Domain", true, &Project::set_show_active_domain).section(section_domain_id),
-                plugin::toggle(setting_show_volume_key, "Show Volume", true, &Project::set_show_volume).section(section_field_id),
-                plugin::toggle(setting_show_occupancy_key, "Show Occupancy", false, &Project::set_show_occupancy).section(section_field_id),
-                plugin::float_value(setting_occupancy_alpha_key, "Occupancy Alpha", 0.18f, &Project::set_occupancy_alpha).section(section_field_id).slider(0.0f, 1.0f, 0.01f),
-                plugin::float_value(setting_occupancy_cell_scale_key, "Cell Scale", 0.75f, &Project::set_occupancy_cell_scale).section(section_field_id).slider(0.05f, 1.0f, 0.05f),
-                plugin::toggle(setting_show_sampler_key, "Show Sampler", false, &Project::set_show_sampler).section(section_sampler_id),
-                plugin::toggle(setting_show_sampler_points_key, "Show Sampler Points", true, &Project::set_show_sampler_points).section(section_sampler_id),
-                plugin::toggle(setting_show_sampler_rays_key, "Show Sampler Rays", true, &Project::set_show_sampler_rays).section(section_sampler_id),
-                plugin::float_value(setting_sampler_point_radius_key, "Point Radius", 0.002f, &Project::set_sampler_point_radius).section(section_sampler_id).slider(0.0001f, 0.01f, 0.0001f),
-                plugin::float_value(setting_sampler_ray_width_key, "Ray Width", 1.5f, &Project::set_sampler_ray_width).section(section_sampler_id).slider(0.25f, 6.0f, 0.25f),
-            },
+            .sections =
+                {
+                    plugin::section(section_dataset_id, "Dataset"),
+                    plugin::section(section_domain_id, "Domain"),
+                    plugin::section(section_timeline_id, "Timeline"),
+                    plugin::section(section_field_id, "Field"),
+                    plugin::section(section_sampler_id, "Sampler"),
+                    plugin::section(section_diagnostics_id, "Diagnostics"),
+                },
+            .open_options =
+                {
+                    plugin::directory("dataset", "Dataset").describe("ScalarReal dataset root directory.").section(section_dataset_id).defaulted(R"(C:\Users\xayah\Desktop\hyfluid-dev\data\ScalarReal)").required(),
+                    plugin::text("frame_sets", "Frame Sets").describe("Comma-separated ScalarReal frame sets: train,test.").section(section_dataset_id).defaulted("train"),
+                    plugin::float_option("scene_scale", "Scene Scale", 1.0f).describe("ScalarReal scene scale passed to the dataset loader.").section(section_dataset_id),
+                    plugin::unsigned_integer("view_stride", "View Stride", 1u).describe("Only every Nth view is visualized.").section(section_dataset_id),
+                    plugin::unsigned_integer("max_views", "Max Views", 0u).describe("0 means no view count limit.").section(section_dataset_id),
+                },
+            .settings =
+                {
+                    plugin::toggle(setting_show_field_domain_key, "Show Field Domain", true, &Project::set_show_field_domain).section(section_domain_id),
+                    plugin::toggle(setting_show_active_domain_key, "Show Active Domain", true, &Project::set_show_active_domain).section(section_domain_id),
+                    plugin::toggle(setting_show_volume_key, "Show Volume", true, &Project::set_show_volume).section(section_field_id),
+                    plugin::toggle(setting_show_occupancy_key, "Show Occupancy", false, &Project::set_show_occupancy).section(section_field_id),
+                    plugin::float_value(setting_occupancy_alpha_key, "Occupancy Alpha", 0.18f, &Project::set_occupancy_alpha).section(section_field_id).slider(0.0f, 1.0f, 0.01f),
+                    plugin::float_value(setting_occupancy_cell_scale_key, "Cell Scale", 0.75f, &Project::set_occupancy_cell_scale).section(section_field_id).slider(0.05f, 1.0f, 0.05f),
+                    plugin::toggle(setting_show_sampler_key, "Show Sampler", false, &Project::set_show_sampler).section(section_sampler_id),
+                    plugin::toggle(setting_show_sampler_points_key, "Show Sampler Points", true, &Project::set_show_sampler_points).section(section_sampler_id),
+                    plugin::toggle(setting_show_sampler_rays_key, "Show Sampler Rays", true, &Project::set_show_sampler_rays).section(section_sampler_id),
+                    plugin::float_value(setting_sampler_point_radius_key, "Point Radius", 0.002f, &Project::set_sampler_point_radius).section(section_sampler_id).slider(0.0001f, 0.01f, 0.0001f),
+                    plugin::float_value(setting_sampler_ray_width_key, "Ray Width", 1.5f, &Project::set_sampler_ray_width).section(section_sampler_id).slider(0.25f, 6.0f, 0.25f),
+                },
         };
         return definition;
     }
 
     Project Project::open(plugin::OpenContext context) {
-        DatasetOptions options = parse_dataset_options(std::span<const plugin::Option>{context.options});
+        DatasetOptions options                                                   = parse_dataset_options(std::span<const plugin::Option>{context.options});
         std::expected<dataset::scalar_real::Dataset, std::string> loaded_dataset = dataset::scalar_real::load(options.dataset_path, dataset::scalar_real::LoadRequest{
-                                                                                                                                    .frame_sets = options.frame_sets,
-                                                                                                                                    .scene_scale = options.scene_scale,
-                                                                                                                                });
+                                                                                                                                        .frame_sets  = options.frame_sets,
+                                                                                                                                        .scene_scale = options.scene_scale,
+                                                                                                                                    });
         if (!loaded_dataset) throw std::runtime_error{loaded_dataset.error()};
 
-        auto state = std::make_unique<State>();
+        auto state             = std::make_unique<State>();
         state->dataset_options = std::move(options);
-        state->dataset = std::move(*loaded_dataset);
-        state->host_services = std::move(context.host_services);
-        state->trainer = std::make_unique<train::HyFluid>(state->dataset);
+        state->dataset         = std::move(*loaded_dataset);
+        state->host_services   = std::move(context.host_services);
+        state->trainer         = std::make_unique<train::HyFluid>(state->dataset);
 
         state->frame_sets.reserve(state->dataset.frame_sets.size());
         for (std::uint32_t frame_set_index = 0u; frame_set_index < state->dataset.frame_sets.size(); ++frame_set_index) {
             const dataset::scalar_real::FrameSet& frame_set = state->dataset.frame_sets.at(frame_set_index);
             FrameSetRuntime runtime{
-                .name = frame_set.name,
+                .name                    = frame_set.name,
                 .dataset_frame_set_index = frame_set_index,
-                .view_count = frame_set.view_count,
-                .time_count = frame_set.time_count,
+                .view_count              = frame_set.view_count,
+                .time_count              = frame_set.time_count,
             };
             if (runtime.view_count == 0u || runtime.time_count == 0u) throw std::runtime_error{std::format("ScalarReal frame set '{}' must contain a dense view-time grid.", frame_set.name)};
             runtime.frame_indices.assign(static_cast<std::size_t>(runtime.view_count) * runtime.time_count, std::numeric_limits<std::uint32_t>::max());
@@ -935,8 +946,8 @@ namespace hyfluid::project {
                 if (video.frame_set != frame_set.name) continue;
                 if (runtime.frame_rate == 0u) {
                     runtime.frame_rate = video.frame_rate;
-                    runtime.width = video.width;
-                    runtime.height = video.height;
+                    runtime.width      = video.width;
+                    runtime.height     = video.height;
                 }
                 if (runtime.frame_rate != video.frame_rate) throw std::runtime_error{std::format("ScalarReal frame set '{}' contains videos with mixed frame rates.", frame_set.name)};
                 if (runtime.width != video.width || runtime.height != video.height) throw std::runtime_error{std::format("ScalarReal frame set '{}' contains videos with mixed dimensions.", frame_set.name)};
@@ -950,7 +961,7 @@ namespace hyfluid::project {
             if (runtime.visible_views.empty()) throw std::runtime_error{std::format("ScalarReal frame set '{}' view selection is empty.", frame_set.name)};
             if (state->timeline_frame_count == 0u) {
                 state->timeline_frame_count = runtime.time_count;
-                state->timeline_frame_rate = static_cast<double>(runtime.frame_rate);
+                state->timeline_frame_rate  = static_cast<double>(runtime.frame_rate);
             } else {
                 if (state->timeline_frame_count != runtime.time_count) throw std::runtime_error{"Selected ScalarReal frame sets must have the same time count for a single Spectra indexed timeline."};
                 if (state->timeline_frame_rate != static_cast<double>(runtime.frame_rate)) throw std::runtime_error{"Selected ScalarReal frame sets must have the same frame rate for a single Spectra indexed timeline."};
@@ -970,18 +981,18 @@ namespace hyfluid::project {
         if (update.timeline_frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project update frame index is outside indexed timeline."};
         this->state->host_update_running = update.update_running;
         if (update.update_delta_seconds == 0.0) return;
-        bool scene_changed = false;
+        bool scene_changed                                               = false;
         const std::expected<train::OptimizationStats, std::string> stats = this->state->trainer->optimize(train::OptimizationRequest{
-            .frame_set = this->state->frame_sets.front().name,
+            .frame_set  = this->state->frame_sets.front().name,
             .iterations = 1,
         });
         if (!stats) throw std::runtime_error{stats.error()};
         this->state->latest_stats = *stats;
-        scene_changed = true;
+        scene_changed             = true;
         publish_domain_visualization_if_ready(*this->state);
-        const std::uint64_t previous_density_revision = this->state->exported_density_revision;
+        const std::uint64_t previous_density_revision   = this->state->exported_density_revision;
         const std::uint64_t previous_occupancy_revision = this->state->exported_occupancy_revision;
-        const std::uint64_t previous_sampler_revision = this->state->exported_sampler_revision;
+        const std::uint64_t previous_sampler_revision   = this->state->exported_sampler_revision;
         publish_density_slice_if_ready(*this->state, update.timeline_frame_index);
         if (this->state->exported_density_revision != previous_density_revision) scene_changed = true;
         publish_occupancy_grid_if_ready(*this->state);
@@ -1002,50 +1013,53 @@ namespace hyfluid::project {
         std::vector<plugin::Light> lights{};
         if (this->state->debug.show_volume) {
             materials.push_back(plugin::Material{
-                .name = density_material_name,
-                .model = "volume",
-                .alpha_mode = "blend",
-                .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
-                .roughness = 0.35f,
-                .volume_density_scale = static_cast<float>(inspector::DensitySliceDimension),
+                .name                     = density_material_name,
+                .model                    = "volume",
+                .alpha_mode               = "blend",
+                .base_color               = {1.0f, 1.0f, 1.0f, 1.0f},
+                .roughness                = 0.35f,
+                .volume_density_scale     = static_cast<float>(inspector::DensitySliceDimension),
                 .volume_temperature_scale = 1.0f,
             });
             lights.push_back(plugin::Light{
-                .name = density_light_name,
-                .kind = "directional",
-                .color = {1.0f, 1.0f, 1.0f},
+                .name      = density_light_name,
+                .kind      = "directional",
+                .color     = {1.0f, 1.0f, 1.0f},
                 .intensity = 3.0f,
             });
         }
         if (this->state->debug.show_sampler && this->state->debug.show_sampler_points) {
             materials.push_back(plugin::Material{
-                .name = sampler_material_name,
-                .model = "point_sprite",
+                .name       = sampler_material_name,
+                .model      = "point_sprite",
                 .alpha_mode = "blend",
                 .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
             });
         }
         scene.set_document(plugin::Document{
-            .timeline = plugin::TimelineDescriptor{
-                .kind = plugin::TimelineKind::Indexed,
-                .frame_rate = this->state->timeline_frame_rate,
-                .frame_count = this->state->timeline_frame_count,
-            },
-            .update = plugin::UpdateDescriptor{
-                .enabled = true,
-                .initial_running = false,
-                .step_delta_seconds = 1.0 / 60.0,
-            },
-            .navigation_target = plugin::ViewportNavigationTarget{
-                .revision = 1u,
-                .focus = {0.5f, 0.5f, 0.5f},
-                .bounds_minimum = {0.0f, 0.0f, 0.0f},
-                .bounds_maximum = {1.0f, 1.0f, 1.0f},
-                .navigation_up = {0.0f, 1.0f, 0.0f},
-            },
+            .timeline =
+                plugin::TimelineDescriptor{
+                    .kind        = plugin::TimelineKind::Indexed,
+                    .frame_rate  = this->state->timeline_frame_rate,
+                    .frame_count = this->state->timeline_frame_count,
+                },
+            .update =
+                plugin::UpdateDescriptor{
+                    .enabled            = true,
+                    .initial_running    = false,
+                    .step_delta_seconds = 1.0 / 60.0,
+                },
+            .navigation_target =
+                plugin::ViewportNavigationTarget{
+                    .revision       = 1u,
+                    .focus          = {0.5f, 0.5f, 0.5f},
+                    .bounds_minimum = {0.0f, 0.0f, 0.0f},
+                    .bounds_maximum = {1.0f, 1.0f, 1.0f},
+                    .navigation_up  = {0.0f, 1.0f, 0.0f},
+                },
             .active_camera_name = "Overview",
-            .materials = std::move(materials),
-            .lights = std::move(lights),
+            .materials          = std::move(materials),
+            .lights             = std::move(lights),
         });
     }
 
@@ -1060,14 +1074,14 @@ namespace hyfluid::project {
         publish_sampler_visualization_if_ready(*this->state, frame.frame_index);
         const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
         plugin::Document document{
-            .cameras = {overview_camera()},
+            .cameras           = {overview_camera()},
             .debug_attachments = this->state->debug_attachments,
         };
 
         for (const FrameSetRuntime& runtime : this->state->frame_sets) {
             const dataset::scalar_real::FrameSet& frame_set = this->state->dataset.frame_sets.at(runtime.dataset_frame_set_index);
             for (const std::uint32_t view_index : runtime.visible_views) {
-                const std::uint32_t frame_index = runtime.frame_indices.at(view_index * runtime.time_count + time_index);
+                const std::uint32_t frame_index                 = runtime.frame_indices.at(view_index * runtime.time_count + time_index);
                 const dataset::scalar_real::Frame& scalar_frame = frame_set.frames.at(frame_index);
                 document.cameras.push_back(frame_camera(scalar_frame, std::format("{} view {:04}", runtime.name, view_index), this->state->dataset.near, this->state->dataset.far));
             }
@@ -1084,9 +1098,7 @@ namespace hyfluid::project {
     void Project::write_controls(plugin::ControlBuilder& controls) const {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
 
-        controls.phase(this->state->host_update_running ? "Running" : "Paused")
-            .headline(this->state->latest_stats.has_value() ? "Density training running" : "ScalarReal dataset loaded")
-            .message(this->state->latest_stats.has_value() ? "HyFluid density-stage batches advance on Spectra update ticks." : "Update clock is paused before the first density batch.");
+        controls.phase(this->state->host_update_running ? "Running" : "Paused").headline(this->state->latest_stats.has_value() ? "Density training running" : "ScalarReal dataset loaded").message(this->state->latest_stats.has_value() ? "HyFluid density-stage batches advance on Spectra update ticks." : "Update clock is paused before the first density batch.");
         controls.metric("dataset", "Dataset", this->state->dataset_options.dataset_path.filename().string()).section(section_dataset_id).display_primary().color({0.55f, 0.85f, 1.0f, 1.0f});
         controls.metric("frame_sets", "Frame Sets", joined_frame_sets(this->state->dataset_options.frame_sets)).section(section_dataset_id);
         controls.metric("frame_set_count", "Frame Set Count", static_cast<std::uint64_t>(this->state->dataset.frame_sets.size())).section(section_dataset_id);
@@ -1100,7 +1112,7 @@ namespace hyfluid::project {
         }
 
         const inspector::TrainingDomainView domain = inspector::Inspector{*this->state->trainer}.training_domain_view();
-        const float minimum_metric_extent = std::min({domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u]});
+        const float minimum_metric_extent          = std::min({domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u]});
         if (!std::isfinite(minimum_metric_extent) || minimum_metric_extent <= 0.0f) throw std::runtime_error{"HyFluid field metric extent is invalid."};
         controls.metric("coordinate_space", "Coordinate Space", "Field [0,1]^3").section(section_domain_id).display_primary().color({0.20f, 0.58f, 1.0f, 1.0f});
         controls.metric("field_domain", "Field Domain", this->state->field_domain_segments.has_value() ? "visible" : "hidden").section(section_domain_id);

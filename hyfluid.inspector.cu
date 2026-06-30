@@ -1,5 +1,5 @@
-#include "hyfluid.train.config.h"
 #include "hyfluid.inspector.h"
+#include "hyfluid.train.config.h"
 #include "hyfluid.train.h"
 #include <algorithm>
 #include <cfloat>
@@ -50,11 +50,11 @@ namespace hyfluid::cuda {
             const std::uint32_t display_z  = cell_index / (dim_x * dim_y);
 
             float* coord = sample_coords + static_cast<std::uint64_t>(i) * train::config::sample_coord_floats;
-            coord[0u]   = (static_cast<float>(display_z) + 0.5f) / static_cast<float>(dim_z);
-            coord[1u]   = (static_cast<float>(display_y) + 0.5f) / static_cast<float>(dim_y);
-            coord[2u]   = (static_cast<float>(display_x) + 0.5f) / static_cast<float>(dim_x);
-            coord[3u]   = time;
-            coord[4u]   = 0.0f;
+            coord[0u]    = (static_cast<float>(display_z) + 0.5f) / static_cast<float>(dim_z);
+            coord[1u]    = (static_cast<float>(display_y) + 0.5f) / static_cast<float>(dim_y);
+            coord[2u]    = (static_cast<float>(display_x) + 0.5f) / static_cast<float>(dim_x);
+            coord[3u]    = time;
+            coord[4u]    = 0.0f;
         }
 
         __global__ void copy_density_slice_output_kernel(const std::uint32_t offset, const std::uint32_t count, const std::uint32_t dim_x, const std::uint32_t dim_y, const std::uint16_t* __restrict__ network_output, float* __restrict__ output_density) {
@@ -76,12 +76,12 @@ namespace hyfluid::cuda {
             __shared__ float shared_sum[train::config::threads_per_block];
             __shared__ std::uint32_t shared_nonzero[train::config::threads_per_block];
 
-            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
-            const bool valid = i < cell_count;
-            const float density = valid ? output_density[i] : 0.0f;
-            shared_min[threadIdx.x] = valid ? density : FLT_MAX;
-            shared_max[threadIdx.x] = valid ? density : 0.0f;
-            shared_sum[threadIdx.x] = valid ? density : 0.0f;
+            const std::uint32_t i       = threadIdx.x + blockIdx.x * blockDim.x;
+            const bool valid            = i < cell_count;
+            const float density         = valid ? output_density[i] : 0.0f;
+            shared_min[threadIdx.x]     = valid ? density : FLT_MAX;
+            shared_max[threadIdx.x]     = valid ? density : 0.0f;
+            shared_sum[threadIdx.x]     = valid ? density : 0.0f;
             shared_nonzero[threadIdx.x] = valid && density > 0.0f ? 1u : 0u;
             __syncthreads();
 
@@ -96,9 +96,9 @@ namespace hyfluid::cuda {
             }
 
             if (threadIdx.x == 0u) {
-                block_min[blockIdx.x] = shared_min[0u];
-                block_max[blockIdx.x] = shared_max[0u];
-                block_sum[blockIdx.x] = shared_sum[0u];
+                block_min[blockIdx.x]     = shared_min[0u];
+                block_max[blockIdx.x]     = shared_max[0u];
+                block_sum[blockIdx.x]     = shared_sum[0u];
                 block_nonzero[blockIdx.x] = shared_nonzero[0u];
             }
         }
@@ -117,25 +117,25 @@ namespace hyfluid::cuda {
             if (i >= ray_count) return;
 
             const std::uint32_t steps = numsteps[i * 2u + 0u];
-            const std::uint32_t base = numsteps[i * 2u + 1u];
+            const std::uint32_t base  = numsteps[i * 2u + 1u];
             if (steps == 0u || base >= sample_count || steps > sample_count - base) return;
 
             const float* start = sample_coords + static_cast<std::uint64_t>(base) * train::config::sample_coord_floats;
             if (sample_time_index(start[3u], time_count) != time_index) return;
 
             for (std::uint32_t j = 0u; j < steps; ++j) {
-                const float* coord = sample_coords + static_cast<std::uint64_t>(base + j) * train::config::sample_coord_floats;
+                const float* coord               = sample_coords + static_cast<std::uint64_t>(base + j) * train::config::sample_coord_floats;
                 const std::uint32_t output_index = atomicAdd(point_counter, 1u);
-                const float time = fminf(1.0f, fmaxf(0.0f, coord[3u]));
+                const float time                 = fminf(1.0f, fmaxf(0.0f, coord[3u]));
                 SamplerPointInstance point{};
-                point.position_radius[0u] = coord[2u];
-                point.position_radius[1u] = coord[1u];
-                point.position_radius[2u] = coord[0u];
-                point.position_radius[3u] = point_radius;
-                point.color[0u] = 0.10f + 0.90f * time;
-                point.color[1u] = 0.76f - 0.34f * time;
-                point.color[2u] = 1.00f - 0.82f * time;
-                point.color[3u] = 0.95f;
+                point.position_radius[0u]     = coord[2u];
+                point.position_radius[1u]     = coord[1u];
+                point.position_radius[2u]     = coord[0u];
+                point.position_radius[3u]     = point_radius;
+                point.color[0u]               = 0.10f + 0.90f * time;
+                point.color[1u]               = 0.76f - 0.34f * time;
+                point.color[2u]               = 1.00f - 0.82f * time;
+                point.color[3u]               = 0.95f;
                 point_instances[output_index] = point;
             }
         }
@@ -145,37 +145,37 @@ namespace hyfluid::cuda {
             if (i >= ray_count) return;
 
             const std::uint32_t steps = numsteps[i * 2u + 0u];
-            const std::uint32_t base = numsteps[i * 2u + 1u];
+            const std::uint32_t base  = numsteps[i * 2u + 1u];
             if (steps == 0u || base >= sample_count || steps > sample_count - base) return;
 
             const float* start = sample_coords + static_cast<std::uint64_t>(base) * train::config::sample_coord_floats;
             if (sample_time_index(start[3u], time_count) != time_index) return;
 
             const std::uint32_t output_index = atomicAdd(ray_counter, 1u);
-            const float* end = sample_coords + static_cast<std::uint64_t>(base + steps - 1u) * train::config::sample_coord_floats;
+            const float* end                 = sample_coords + static_cast<std::uint64_t>(base + steps - 1u) * train::config::sample_coord_floats;
             SamplerSegmentInstance segment{};
             segment.start_width[3u] = ray_width;
-            segment.flags = width_mode;
+            segment.flags           = width_mode;
             segment.start_width[0u] = start[2u];
             segment.start_width[1u] = start[1u];
             segment.start_width[2u] = start[0u];
-            segment.end[0u] = end[2u];
-            segment.end[1u] = end[1u];
-            segment.end[2u] = end[0u];
+            segment.end[0u]         = end[2u];
+            segment.end[1u]         = end[1u];
+            segment.end[2u]         = end[0u];
 
             if (steps == 1u) {
                 const float* ray = rays + static_cast<std::uint64_t>(i) * train::config::ray_floats;
-                segment.end[0u] = segment.start_width[0u] + ray[5u] * train::config::min_cone_stepsize;
-                segment.end[1u] = segment.start_width[1u] + ray[4u] * train::config::min_cone_stepsize;
-                segment.end[2u] = segment.start_width[2u] + ray[3u] * train::config::min_cone_stepsize;
+                segment.end[0u]  = segment.start_width[0u] + ray[5u] * train::config::min_cone_stepsize;
+                segment.end[1u]  = segment.start_width[1u] + ray[4u] * train::config::min_cone_stepsize;
+                segment.end[2u]  = segment.start_width[2u] + ray[3u] * train::config::min_cone_stepsize;
             }
 
-            const float time = fminf(1.0f, fmaxf(0.0f, start[3u]));
-            const float heat = fminf(1.0f, static_cast<float>(steps) / 128.0f);
-            segment.color[0u] = 0.18f + 0.82f * time;
-            segment.color[1u] = 0.42f + 0.40f * heat;
-            segment.color[2u] = 0.95f - 0.72f * time;
-            segment.color[3u] = 0.52f;
+            const float time                = fminf(1.0f, fmaxf(0.0f, start[3u]));
+            const float heat                = fminf(1.0f, static_cast<float>(steps) / 128.0f);
+            segment.color[0u]               = 0.18f + 0.82f * time;
+            segment.color[1u]               = 0.42f + 0.40f * heat;
+            segment.color[2u]               = 0.95f - 0.72f * time;
+            segment.color[3u]               = 0.52f;
             segment_instances[output_index] = segment;
         }
     } // namespace
@@ -194,20 +194,20 @@ namespace hyfluid::cuda {
         std::vector<float> host_coords(value_count);
         if (const cudaError_t status = cudaMemcpy(host_coords.data(), sample_coords, value_count * sizeof(float), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy training batch diagnostics failed: "} + cudaGetErrorString(status)};
 
-        out_diagnostics.coord_min[0u] = std::numeric_limits<float>::infinity();
-        out_diagnostics.coord_min[1u] = std::numeric_limits<float>::infinity();
-        out_diagnostics.coord_min[2u] = std::numeric_limits<float>::infinity();
-        out_diagnostics.coord_max[0u] = -std::numeric_limits<float>::infinity();
-        out_diagnostics.coord_max[1u] = -std::numeric_limits<float>::infinity();
-        out_diagnostics.coord_max[2u] = -std::numeric_limits<float>::infinity();
-        out_diagnostics.time_min = std::numeric_limits<float>::infinity();
-        out_diagnostics.time_max = -std::numeric_limits<float>::infinity();
-        out_diagnostics.dt_metric_min = std::numeric_limits<float>::infinity();
-        out_diagnostics.dt_metric_max = 0.0f;
+        out_diagnostics.coord_min[0u]             = std::numeric_limits<float>::infinity();
+        out_diagnostics.coord_min[1u]             = std::numeric_limits<float>::infinity();
+        out_diagnostics.coord_min[2u]             = std::numeric_limits<float>::infinity();
+        out_diagnostics.coord_max[0u]             = -std::numeric_limits<float>::infinity();
+        out_diagnostics.coord_max[1u]             = -std::numeric_limits<float>::infinity();
+        out_diagnostics.coord_max[2u]             = -std::numeric_limits<float>::infinity();
+        out_diagnostics.time_min                  = std::numeric_limits<float>::infinity();
+        out_diagnostics.time_max                  = -std::numeric_limits<float>::infinity();
+        out_diagnostics.dt_metric_min             = std::numeric_limits<float>::infinity();
+        out_diagnostics.dt_metric_max             = 0.0f;
         out_diagnostics.metric_per_field_unit_min = std::numeric_limits<float>::infinity();
         out_diagnostics.metric_per_field_unit_max = 0.0f;
 
-        double dt_sum = 0.0;
+        double dt_sum     = 0.0;
         double metric_sum = 0.0;
         for (std::uint32_t sample_index = 0u; sample_index < sample_count; ++sample_index) {
             const float* coord = host_coords.data() + static_cast<std::uint64_t>(sample_index) * train::config::sample_coord_floats;
@@ -215,17 +215,17 @@ namespace hyfluid::cuda {
                 out_diagnostics.coord_min[axis] = std::min(out_diagnostics.coord_min[axis], coord[axis]);
                 out_diagnostics.coord_max[axis] = std::max(out_diagnostics.coord_max[axis], coord[axis]);
             }
-            out_diagnostics.time_min = std::min(out_diagnostics.time_min, coord[3u]);
-            out_diagnostics.time_max = std::max(out_diagnostics.time_max, coord[3u]);
-            out_diagnostics.dt_metric_min = std::min(out_diagnostics.dt_metric_min, coord[4u]);
-            out_diagnostics.dt_metric_max = std::max(out_diagnostics.dt_metric_max, coord[4u]);
-            const float metric_per_field_unit = coord[4u] / train::config::min_cone_stepsize;
+            out_diagnostics.time_min                  = std::min(out_diagnostics.time_min, coord[3u]);
+            out_diagnostics.time_max                  = std::max(out_diagnostics.time_max, coord[3u]);
+            out_diagnostics.dt_metric_min             = std::min(out_diagnostics.dt_metric_min, coord[4u]);
+            out_diagnostics.dt_metric_max             = std::max(out_diagnostics.dt_metric_max, coord[4u]);
+            const float metric_per_field_unit         = coord[4u] / train::config::min_cone_stepsize;
             out_diagnostics.metric_per_field_unit_min = std::min(out_diagnostics.metric_per_field_unit_min, metric_per_field_unit);
             out_diagnostics.metric_per_field_unit_max = std::max(out_diagnostics.metric_per_field_unit_max, metric_per_field_unit);
             dt_sum += static_cast<double>(coord[4u]);
             metric_sum += static_cast<double>(metric_per_field_unit);
         }
-        out_diagnostics.dt_metric_mean = static_cast<float>(dt_sum / static_cast<double>(sample_count));
+        out_diagnostics.dt_metric_mean             = static_cast<float>(dt_sum / static_cast<double>(sample_count));
         out_diagnostics.metric_per_field_unit_mean = static_cast<float>(metric_sum / static_cast<double>(sample_count));
     }
 
@@ -236,8 +236,8 @@ namespace hyfluid::cuda {
 
         for (std::uint32_t offset = 0u; offset < train::config::nerf_grid_cells; offset += train::config::network_batch_size) {
             const std::uint32_t remaining = train::config::nerf_grid_cells - offset;
-            const std::uint32_t count = remaining < train::config::network_batch_size ? remaining : train::config::network_batch_size;
-            const std::uint32_t blocks = (count + train::config::threads_per_block - 1u) / train::config::threads_per_block;
+            const std::uint32_t count     = remaining < train::config::network_batch_size ? remaining : train::config::network_batch_size;
+            const std::uint32_t blocks    = (count + train::config::threads_per_block - 1u) / train::config::threads_per_block;
 
             write_density_slice_coords_kernel<<<blocks, train::config::threads_per_block>>>(offset, count, dim_x, dim_y, dim_z, time, sample_coords);
             if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"write_density_slice_coords_kernel failed: "} + cudaGetErrorString(status)};
@@ -249,10 +249,10 @@ namespace hyfluid::cuda {
         }
 
         const std::uint32_t block_count = (train::config::nerf_grid_cells + train::config::threads_per_block - 1u) / train::config::threads_per_block;
-        float* block_min = nullptr;
-        float* block_max = nullptr;
-        float* block_sum = nullptr;
-        std::uint32_t* block_nonzero = nullptr;
+        float* block_min                = nullptr;
+        float* block_max                = nullptr;
+        float* block_sum                = nullptr;
+        std::uint32_t* block_nonzero    = nullptr;
         try {
             if (const cudaError_t status = cudaMalloc(&block_min, static_cast<std::size_t>(block_count) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density stats min failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaMalloc(&block_max, static_cast<std::size_t>(block_count) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density stats max failed: "} + cudaGetErrorString(status)};
@@ -271,9 +271,9 @@ namespace hyfluid::cuda {
             if (const cudaError_t status = cudaMemcpy(host_sum.data(), block_sum, static_cast<std::size_t>(block_count) * sizeof(float), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy density stats sum failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaMemcpy(host_nonzero.data(), block_nonzero, static_cast<std::size_t>(block_count) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy density stats nonzero failed: "} + cudaGetErrorString(status)};
 
-            double density_sum = 0.0;
-            out_density_min = FLT_MAX;
-            out_density_max = 0.0f;
+            double density_sum        = 0.0;
+            out_density_min           = FLT_MAX;
+            out_density_max           = 0.0f;
             out_density_nonzero_count = 0u;
             for (std::uint32_t block = 0u; block < block_count; ++block) {
                 out_density_min = std::min(out_density_min, host_min[block]);
@@ -283,14 +283,14 @@ namespace hyfluid::cuda {
             }
             out_density_mean = static_cast<float>(density_sum / static_cast<double>(train::config::nerf_grid_cells));
             if (out_density_min == FLT_MAX) out_density_min = 0.0f;
-            const cudaError_t free_min_status = cudaFree(block_min);
-            block_min = nullptr;
-            const cudaError_t free_max_status = cudaFree(block_max);
-            block_max = nullptr;
-            const cudaError_t free_sum_status = cudaFree(block_sum);
-            block_sum = nullptr;
+            const cudaError_t free_min_status     = cudaFree(block_min);
+            block_min                             = nullptr;
+            const cudaError_t free_max_status     = cudaFree(block_max);
+            block_max                             = nullptr;
+            const cudaError_t free_sum_status     = cudaFree(block_sum);
+            block_sum                             = nullptr;
             const cudaError_t free_nonzero_status = cudaFree(block_nonzero);
-            block_nonzero = nullptr;
+            block_nonzero                         = nullptr;
             if (free_min_status != cudaSuccess) throw std::runtime_error{std::string{"cudaFree density stats min failed: "} + cudaGetErrorString(free_min_status)};
             if (free_max_status != cudaSuccess) throw std::runtime_error{std::string{"cudaFree density stats max failed: "} + cudaGetErrorString(free_max_status)};
             if (free_sum_status != cudaSuccess) throw std::runtime_error{std::string{"cudaFree density stats sum failed: "} + cudaGetErrorString(free_sum_status)};
@@ -302,7 +302,6 @@ namespace hyfluid::cuda {
             if (block_nonzero != nullptr) cudaFree(block_nonzero);
             throw;
         }
-
     }
 
     void fill_sampler_visualization(const std::uint32_t ray_count, const std::uint32_t sample_count, const float* const rays, const std::uint32_t* const numsteps, const float* const sample_coords, const std::uint32_t time_count, const std::uint32_t time_index, const float point_radius, const float ray_width, const std::uint32_t width_mode, std::byte* const point_instances, const std::uint64_t point_byte_size, std::byte* const segment_instances, const std::uint64_t segment_byte_size, std::uint32_t& out_point_count, std::uint32_t& out_ray_count) {
@@ -310,7 +309,7 @@ namespace hyfluid::cuda {
         if (time_count == 0u || time_index >= time_count) throw std::runtime_error{"invalid sampler visualization time filter."};
         if (width_mode > 1u) throw std::runtime_error{"invalid sampler visualization width mode."};
         out_point_count = 0u;
-        out_ray_count = 0u;
+        out_ray_count   = 0u;
 
         std::uint32_t* counters = nullptr;
         try {
@@ -333,10 +332,10 @@ namespace hyfluid::cuda {
 
             std::uint32_t counts[2]{};
             if (const cudaError_t status = cudaMemcpy(counts, counters, 2u * sizeof(std::uint32_t), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy sampler visualization counters failed: "} + cudaGetErrorString(status)};
-            out_point_count = counts[0u];
-            out_ray_count = counts[1u];
+            out_point_count               = counts[0u];
+            out_ray_count                 = counts[1u];
             const cudaError_t free_status = cudaFree(counters);
-            counters = nullptr;
+            counters                      = nullptr;
             if (free_status != cudaSuccess) throw std::runtime_error{std::string{"cudaFree sampler visualization counters failed: "} + cudaGetErrorString(free_status)};
         } catch (...) {
             if (counters != nullptr) cudaFree(counters);
