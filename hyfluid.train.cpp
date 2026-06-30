@@ -1,6 +1,9 @@
 module;
 #include "hyfluid.train.h"
 #include "hyfluid.train.config.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
 module hyfluid.train;
 import std;
 
@@ -20,14 +23,32 @@ namespace hyfluid::train {
             for (std::size_t i = 0uz; i < 16uz; ++i) {
                 if (!std::isfinite(dataset.sim_to_world[i])) throw std::runtime_error{"sim_to_world contains non-finite values."};
                 if (!std::isfinite(dataset.world_to_sim[i])) throw std::runtime_error{"world_to_sim contains non-finite values."};
-                this->host.sim_to_world[i] = dataset.sim_to_world[i];
-                this->host.world_to_sim[i] = dataset.world_to_sim[i];
             }
             for (std::size_t i = 0uz; i < 3uz; ++i) {
                 if (!std::isfinite(dataset.voxel_scale[i]) || dataset.voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
                 if (!std::isfinite(dataset.render_center[i])) throw std::runtime_error{"render_center contains non-finite values."};
-                this->host.voxel_scale[i] = dataset.voxel_scale[i];
-                this->host.render_center[i] = dataset.render_center[i];
+            }
+            const std::array field_sim_extent = {
+                config::scalar_real_active_sim_max[0u] - config::scalar_real_active_sim_min[0u],
+                config::scalar_real_active_sim_max[1u] - config::scalar_real_active_sim_min[1u],
+                config::scalar_real_active_sim_max[2u] - config::scalar_real_active_sim_min[2u],
+            };
+            for (const float extent : field_sim_extent)
+                if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"ScalarReal active simulation box is invalid."};
+            for (std::size_t row = 0uz; row < 3uz; ++row) {
+                this->host.field_to_world_translation[row] = dataset.sim_to_world[row * 4uz + 3uz];
+                for (std::size_t column = 0uz; column < 3uz; ++column) {
+                    const float sim_coordinate = config::scalar_real_active_sim_min[column] * dataset.voxel_scale[column];
+                    this->host.field_to_world_translation[row] += dataset.sim_to_world[row * 4uz + column] * sim_coordinate;
+                    this->host.field_to_world_linear[row * 3uz + column] = dataset.sim_to_world[row * 4uz + column] * dataset.voxel_scale[column] * field_sim_extent[column];
+                }
+            }
+            for (std::size_t column = 0uz; column < 3uz; ++column) {
+                const float x = this->host.field_to_world_linear[column];
+                const float y = this->host.field_to_world_linear[3uz + column];
+                const float z = this->host.field_to_world_linear[6uz + column];
+                const float extent = std::sqrt(x * x + y * y + z * z);
+                if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"Field domain metric extent is invalid."};
             }
             this->host.scene_scale = dataset.scene_scale;
             this->host.near = dataset.near;
@@ -70,6 +91,9 @@ namespace hyfluid::train {
                     std::vector<std::uint32_t> view_indices;
                     std::vector<std::uint32_t> time_indices;
                     std::vector<std::uint32_t> frame_indices(frame_set.frames.size(), std::numeric_limits<std::uint32_t>::max());
+                    std::vector<std::array<float, 12u>> view_camera(frame_set.view_count);
+                    std::vector<std::array<float, 4u>> view_intrinsics(frame_set.view_count);
+                    std::vector<std::uint8_t> view_reference_seen(frame_set.view_count, 0u);
                     pixels.reserve(frame_set.frames.size() * static_cast<std::size_t>(frame_pixel_bytes));
                     camera.reserve(frame_set.frames.size() * 12uz);
                     intrinsics.reserve(frame_set.frames.size() * 4uz);
@@ -89,6 +113,17 @@ namespace hyfluid::train {
                         if (frame.time_index >= frame_set.time_count) throw std::runtime_error{std::format("frame set '{}' contains time_index {} outside time_count {}.", frame_set.name, frame.time_index, frame_set.time_count)};
                         for (const float camera_value : frame.camera)
                             if (!std::isfinite(camera_value)) throw std::runtime_error{std::format("frame set '{}' contains non-finite camera values.", frame_set.name)};
+                        const std::array<float, 4u> frame_intrinsics = {frame.focal_x, frame.focal_y, frame.principal_x, frame.principal_y};
+                        if (view_reference_seen[frame.view_index] == 0u) {
+                            for (std::size_t i = 0uz; i < 12uz; ++i) view_camera[frame.view_index][i] = frame.camera[i];
+                            view_intrinsics[frame.view_index] = frame_intrinsics;
+                            view_reference_seen[frame.view_index] = 1u;
+                        } else {
+                            for (std::size_t i = 0uz; i < 12uz; ++i)
+                                if (view_camera[frame.view_index][i] != frame.camera[i]) throw std::runtime_error{std::format("frame set '{}' contains changing camera values for view {}.", frame_set.name, frame.view_index)};
+                            for (std::size_t i = 0uz; i < 4uz; ++i)
+                                if (view_intrinsics[frame.view_index][i] != frame_intrinsics[i]) throw std::runtime_error{std::format("frame set '{}' contains changing intrinsics for view {}.", frame_set.name, frame.view_index)};
+                        }
 
                         const std::uint32_t frame_grid_index = frame.view_index * frame_set.time_count + frame.time_index;
                         if (frame_indices[frame_grid_index] != std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("frame set '{}' contains duplicate frame at view {} time {}.", frame_set.name, frame.view_index, frame.time_index)};
@@ -193,22 +228,42 @@ namespace hyfluid::train {
                 }
             }
 
+            std::uint64_t evaluation_pixel_capacity = 0ull;
+            for (const HostFrameSet& frame_set : this->host.frame_sets) {
+                if (frame_set.width % config::training_image_downsample != 0u || frame_set.height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("frame set '{}' dimensions must be divisible by training image downsample.", frame_set.name)};
+                const std::uint64_t render_width = frame_set.width / config::training_image_downsample;
+                const std::uint64_t render_height = frame_set.height / config::training_image_downsample;
+                evaluation_pixel_capacity = std::max(evaluation_pixel_capacity, render_width * render_height);
+            }
+            if (evaluation_pixel_capacity == 0ull || evaluation_pixel_capacity > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation render pixel capacity is invalid."};
+            this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
+
+            cuda::upload_field_domain(this->host.field_to_world_linear.data(), this->device.field_to_world_linear);
             cuda::allocate_sampler_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
+            cuda::allocate_training_loss_buffers(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients);
+            cuda::allocate_network_buffers(this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
+            cuda::allocate_trainable_parameter_buffers(this->device.params_full_precision, this->device.params, this->device.param_gradients);
+            cuda::initialize_trainable_parameters(this->device.params_full_precision, this->device.params);
+            cuda::allocate_optimizer_buffers(this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
+            cuda::allocate_evaluation_buffers(this->host.evaluation_pixel_capacity, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
             cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_occupied_count);
             this->host.current_step = 0u;
             this->host.rays_per_batch = config::initial_rays_per_batch;
+            this->host.inference_sample_count = config::network_batch_size;
+            this->host.measured_sample_count_before_compaction = 0u;
             this->host.measured_sample_count = 0u;
             this->host.occupancy_grid_occupied_cells = config::nerf_grid_cells;
-            this->host.occupancy_grid_revision = 1u;
         } catch (...) {
-            cuda::free_device_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
+            cuda::destroy_network_handle(this->device.cublaslt_handle);
+            cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
             for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
             throw;
         }
     }
 
     HyFluid::~HyFluid() noexcept {
-        cuda::free_device_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
+        cuda::destroy_network_handle(this->device.cublaslt_handle);
+        cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
         for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
     }
 
@@ -230,25 +285,45 @@ namespace hyfluid::train {
             const auto optimize_start = std::chrono::steady_clock::now();
             std::uint32_t ray_count = 0u;
             std::uint32_t sample_count = 0u;
+            std::uint32_t compacted_sample_count = 0u;
+            std::uint32_t loss_value_count = this->host.rays_per_batch;
             for (std::int32_t i = 0; i < request.iterations; ++i) {
-                cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->times, device_frame_set->frame_indices, host_frame_set->frame_count, host_frame_set->width, host_frame_set->height, this->host.current_step, this->host.rays_per_batch, config::max_samples, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
+                loss_value_count = this->host.rays_per_batch;
+                cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->host.current_step, this->host.rays_per_batch, this->host.inference_sample_count, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
+                cuda::evaluate_network(this->host.inference_sample_count, this->device.sample_coords, this->device.params, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace);
+                cuda::compute_training_loss_and_compact_samples(this->host.rays_per_batch, this->host.current_step, this->device.ray_counter, device_frame_set->pixels, device_frame_set->frame_indices, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->device.network_output, this->device.compacted_sample_counter, this->device.ray_indices, this->device.numsteps, this->device.sample_coords, this->device.compacted_sample_coords, this->device.network_output_gradients, this->device.param_gradients, this->device.params, this->device.loss_values);
+                cuda::pad_compacted_training_batch(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.network_output_gradients);
+                cuda::forward_network(this->device.compacted_sample_coords, this->device.params, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace);
+                cuda::backward_network(this->device.compacted_sample_coords, this->device.params, this->device.param_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_output_gradients, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
+                cuda::step_optimizer(this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
                 cuda::read_counter(this->device.ray_counter, ray_count);
                 cuda::read_counter(this->device.sample_counter, sample_count);
                 if (sample_count > config::max_samples) sample_count = config::max_samples;
-                if (ray_count == 0u || sample_count == 0u) throw std::runtime_error{"HyFluid sampler produced an empty batch."};
-                this->host.measured_sample_count = sample_count;
+                cuda::read_counter(this->device.compacted_sample_counter, compacted_sample_count);
+                if (compacted_sample_count > config::network_batch_size) compacted_sample_count = config::network_batch_size;
+                if (ray_count == 0u || sample_count == 0u || compacted_sample_count == 0u) throw std::runtime_error{"HyFluid density training produced an empty batch."};
+                this->host.measured_sample_count_before_compaction = sample_count;
+                this->host.measured_sample_count = compacted_sample_count;
+                this->host.inference_sample_count = ((std::min(sample_count, config::max_samples) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
+                if (this->host.inference_sample_count == 0u) this->host.inference_sample_count = config::network_batch_granularity;
+                if (this->host.inference_sample_count > config::network_batch_size) this->host.inference_sample_count = config::network_batch_size;
                 ++this->host.current_step;
             }
+            float loss_sum = 0.0f;
+            cuda::read_loss_sum(this->device.loss_values, loss_value_count, loss_sum);
             cuda::read_counter(this->device.occupancy_grid_occupied_count, this->host.occupancy_grid_occupied_cells);
+            const float psnr = loss_sum > 0.0f ? -10.0f * std::log10(loss_sum) : std::numeric_limits<float>::infinity();
             return OptimizationStats{
                 .step = this->host.current_step,
                 .rays_per_batch = this->host.rays_per_batch,
                 .ray_count = ray_count,
-                .sample_count = sample_count,
+                .sample_count_before_compaction = sample_count,
+                .sample_count = compacted_sample_count,
                 .occupancy_grid_occupied_cells = this->host.occupancy_grid_occupied_cells,
-                .loss = 0.0f,
+                .loss = loss_sum,
+                .psnr = psnr,
                 .elapsed_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - optimize_start).count(),
-                .sample_efficiency_ratio = static_cast<float>(sample_count) / static_cast<float>(config::max_samples),
+                .sample_efficiency_ratio = sample_count == 0u ? 0.0f : static_cast<float>(compacted_sample_count) / static_cast<float>(sample_count),
                 .occupancy_grid_ratio = static_cast<float>(this->host.occupancy_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
             };
         } catch (const std::exception& error) {
@@ -259,7 +334,89 @@ namespace hyfluid::train {
     std::expected<EvaluationStats, std::string> HyFluid::evaluate(const EvaluationRequest request) const {
         try {
             if (request.frame_set.empty()) throw std::runtime_error{"evaluation frame set must not be empty."};
-            throw std::runtime_error{"HyFluid evaluation is not implemented yet."};
+            if (request.output_dir.empty()) throw std::runtime_error{"evaluation output directory must not be empty."};
+            if (std::filesystem::exists(request.output_dir) && !std::filesystem::is_directory(request.output_dir)) throw std::runtime_error{std::format("evaluation output path '{}' is not a directory.", request.output_dir.string())};
+            std::filesystem::create_directories(request.output_dir);
+            if (!std::filesystem::is_directory(request.output_dir)) throw std::runtime_error{std::format("failed to create evaluation output directory '{}'.", request.output_dir.string())};
+
+            const HostFrameSet* host_frame_set = nullptr;
+            const DeviceFrameSet* device_frame_set = nullptr;
+            for (std::size_t frame_set_index = 0uz; frame_set_index < this->host.frame_sets.size(); ++frame_set_index) {
+                if (this->host.frame_sets[frame_set_index].name == request.frame_set) {
+                    host_frame_set = std::addressof(this->host.frame_sets[frame_set_index]);
+                    device_frame_set = std::addressof(this->device.frame_sets[frame_set_index]);
+                    break;
+                }
+            }
+            if (host_frame_set == nullptr || device_frame_set == nullptr) throw std::runtime_error{std::format("evaluation frame set '{}' is not loaded.", request.frame_set)};
+            if (host_frame_set->view_count == 0u || host_frame_set->time_count == 0u || host_frame_set->frame_count != host_frame_set->view_count * host_frame_set->time_count) throw std::runtime_error{std::format("evaluation frame set '{}' is not a dense view-time grid.", host_frame_set->name)};
+            if (host_frame_set->width % config::training_image_downsample != 0u || host_frame_set->height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("evaluation frame set '{}' dimensions are not divisible by training image downsample.", host_frame_set->name)};
+
+            const std::uint32_t render_width = host_frame_set->width / config::training_image_downsample;
+            const std::uint32_t render_height = host_frame_set->height / config::training_image_downsample;
+            if (render_width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) || render_height > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) throw std::runtime_error{"evaluation render dimensions exceed PNG writer limits."};
+            const std::uint64_t render_pixels = static_cast<std::uint64_t>(render_width) * render_height;
+            if (render_pixels == 0ull || render_pixels > this->host.evaluation_pixel_capacity) throw std::runtime_error{"evaluation render image exceeds allocated capacity."};
+            const std::uint64_t image_count = static_cast<std::uint64_t>(host_frame_set->view_count) * host_frame_set->time_count;
+            if (image_count > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation image count is too large."};
+
+            const auto evaluation_start = std::chrono::steady_clock::now();
+            std::vector<std::uint8_t> evaluation_pixels(static_cast<std::size_t>(render_pixels) * 3uz);
+            double loss_sum = 0.0;
+            std::uint32_t rendered_image_count = 0u;
+            for (std::uint32_t view_index = 0u; view_index < host_frame_set->view_count; ++view_index) {
+                const std::filesystem::path view_output_dir = request.output_dir / std::format("view_{:04}", view_index);
+                std::filesystem::create_directories(view_output_dir);
+                if (!std::filesystem::is_directory(view_output_dir)) throw std::runtime_error{std::format("failed to create evaluation view output directory '{}'.", view_output_dir.string())};
+                for (std::uint32_t time_index = 0u; time_index < host_frame_set->time_count; ++time_index) {
+                    double image_loss_sum = 0.0;
+                    cuda::run_evaluation_image(device_frame_set->pixels, device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, view_index, time_index, this->host.evaluation_pixel_capacity, this->device.occupancy, this->device.params, this->device.sample_coords, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels, evaluation_pixels.data(), image_loss_sum);
+                    loss_sum += image_loss_sum;
+                    const std::filesystem::path output_path = view_output_dir / std::format("rgb_{:04}.png", time_index);
+                    const std::string output_path_text = output_path.string();
+                    if (stbi_write_png(output_path_text.c_str(), static_cast<int>(render_width), static_cast<int>(render_height), 3, evaluation_pixels.data(), static_cast<int>(render_width * 3u)) == 0) throw std::runtime_error{std::format("failed to write evaluation image '{}'.", output_path_text)};
+                    ++rendered_image_count;
+                }
+            }
+
+            const std::uint64_t pixel_count = render_pixels * rendered_image_count;
+            if (pixel_count == 0ull) throw std::runtime_error{"evaluation produced no pixels."};
+            const double mse = loss_sum / (static_cast<double>(pixel_count) * 3.0);
+            if (!std::isfinite(mse)) throw std::runtime_error{"evaluation produced non-finite MSE."};
+            const float psnr = mse > 0.0 ? static_cast<float>(-10.0 * std::log10(mse)) : std::numeric_limits<float>::infinity();
+            EvaluationStats stats{
+                .frame_set = std::string{request.frame_set},
+                .step = this->host.current_step,
+                .render_width = render_width,
+                .render_height = render_height,
+                .image_count = static_cast<std::uint32_t>(image_count),
+                .rendered_image_count = rendered_image_count,
+                .pixel_count = pixel_count,
+                .mse = static_cast<float>(mse),
+                .psnr = psnr,
+                .elapsed_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - evaluation_start).count(),
+                .output_dir = request.output_dir,
+            };
+
+            const std::filesystem::path metrics_path = request.output_dir / "metrics.json";
+            std::ofstream metrics{metrics_path, std::ios::binary | std::ios::trunc};
+            if (!metrics) throw std::runtime_error{std::format("failed to open evaluation metrics '{}'.", metrics_path.string())};
+            metrics << "{\n";
+            metrics << "  \"frame_set\": " << std::quoted(stats.frame_set) << ",\n";
+            metrics << "  \"step\": " << stats.step << ",\n";
+            metrics << "  \"render_width\": " << stats.render_width << ",\n";
+            metrics << "  \"render_height\": " << stats.render_height << ",\n";
+            metrics << "  \"view_count\": " << host_frame_set->view_count << ",\n";
+            metrics << "  \"time_count\": " << host_frame_set->time_count << ",\n";
+            metrics << "  \"image_count\": " << stats.image_count << ",\n";
+            metrics << "  \"rendered_image_count\": " << stats.rendered_image_count << ",\n";
+            metrics << "  \"pixel_count\": " << stats.pixel_count << ",\n";
+            metrics << "  \"mse\": " << std::setprecision(9) << stats.mse << ",\n";
+            metrics << "  \"psnr\": " << std::setprecision(9) << stats.psnr << ",\n";
+            metrics << "  \"elapsed_ms\": " << std::setprecision(9) << stats.elapsed_ms << ",\n";
+            metrics << "  \"output_dir\": " << std::quoted(stats.output_dir.string()) << "\n";
+            metrics << "}\n";
+            return stats;
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
         }

@@ -117,29 +117,34 @@ namespace hyfluid::train {
 
     export struct EvaluationRequest final {
         std::string_view frame_set;
-        std::optional<std::filesystem::path> comparison_output_dir;
+        std::filesystem::path output_dir;
     };
 
     export struct OptimizationStats final {
-        std::uint32_t step                          = 0u;
-        std::uint32_t rays_per_batch                = 0u;
-        std::uint32_t ray_count                     = 0u;
-        std::uint32_t sample_count                  = 0u;
-        std::uint32_t occupancy_grid_occupied_cells = 0u;
-        float loss                                  = 0.0f;
-        float elapsed_ms                            = 0.0f;
-        float sample_efficiency_ratio               = 0.0f;
-        float occupancy_grid_ratio                  = 0.0f;
+        std::uint32_t step                           = 0u;
+        std::uint32_t rays_per_batch                 = 0u;
+        std::uint32_t ray_count                      = 0u;
+        std::uint32_t sample_count_before_compaction = 0u;
+        std::uint32_t sample_count                   = 0u;
+        std::uint32_t occupancy_grid_occupied_cells  = 0u;
+        float loss                                   = 0.0f;
+        float psnr                                   = 0.0f;
+        float elapsed_ms                             = 0.0f;
+        float sample_efficiency_ratio                = 0.0f;
+        float occupancy_grid_ratio                   = 0.0f;
     };
 
     export struct EvaluationStats final {
         std::string frame_set;
-        std::uint32_t step        = 0u;
-        std::uint32_t image_count = 0u;
-        std::uint64_t pixel_count = 0u;
-        float mse                 = 0.0f;
-        float psnr                = 0.0f;
-        float elapsed_ms          = 0.0f;
+        std::uint32_t step                 = 0u;
+        std::uint32_t render_width         = 0u;
+        std::uint32_t render_height        = 0u;
+        std::uint32_t image_count          = 0u;
+        std::uint32_t rendered_image_count = 0u;
+        std::uint64_t pixel_count          = 0u;
+        float mse                          = 0.0f;
+        float psnr                         = 0.0f;
+        float elapsed_ms                   = 0.0f;
         std::filesystem::path output_dir;
     };
 
@@ -271,22 +276,22 @@ namespace hyfluid::train {
             std::vector<HostFrameSet> frame_sets = {};
             std::vector<HostFrame> frames        = {};
             std::vector<HostVideo> videos        = {};
-            std::array<float, 16u> sim_to_world  = {};
-            std::array<float, 16u> world_to_sim  = {};
-            std::array<float, 3u> voxel_scale    = {};
-            std::array<float, 3u> render_center  = {};
+            std::array<float, 9u> field_to_world_linear = {};
+            std::array<float, 3u> field_to_world_translation = {};
             float scene_scale                    = 0.0f;
             float near                           = 0.0f;
             float far                            = 0.0f;
             float phi                            = 0.0f;
             char rotation_axis                   = 'Y';
 
-            // Mutated by optimize(): sampler step and latest counters.
+            // Mutated by optimize(): training step, adaptive batch shape, and latest counters.
             std::uint32_t current_step                    = 0u;
             std::uint32_t rays_per_batch                  = 0u;
+            std::uint32_t inference_sample_count          = 0u;
+            std::uint32_t evaluation_pixel_capacity       = 0u;
+            std::uint32_t measured_sample_count_before_compaction = 0u;
             std::uint32_t measured_sample_count           = 0u;
             std::uint32_t occupancy_grid_occupied_cells   = 0u;
-            std::uint64_t occupancy_grid_revision         = 0u;
         } host;
 
         struct DeviceFrameSet final {
@@ -302,6 +307,7 @@ namespace hyfluid::train {
         struct DeviceData {
             // Dataset.
             std::vector<DeviceFrameSet> frame_sets = {};
+            float* field_to_world_linear = nullptr;
 
             // Sampler.
             std::uint8_t* occupancy                    = nullptr;
@@ -312,6 +318,38 @@ namespace hyfluid::train {
             std::uint32_t* ray_counter                 = nullptr;
             std::uint32_t* sample_counter              = nullptr;
             std::uint32_t* occupancy_grid_occupied_count = nullptr;
+
+            // Loss and compaction.
+            std::uint32_t* compacted_sample_counter = nullptr;
+            float* compacted_sample_coords          = nullptr;
+            float* loss_values                      = nullptr;
+            std::uint16_t* network_output_gradients = nullptr;
+
+            // Network.
+            std::uint16_t* network_input           = nullptr;
+            std::uint16_t* network_hidden          = nullptr;
+            std::uint16_t* network_output          = nullptr;
+            std::uint16_t* network_input_gradients = nullptr;
+            std::uint16_t* network_hidden_gradients = nullptr;
+            void* cublaslt_handle                  = nullptr;
+            std::uint8_t* cublaslt_workspace       = nullptr;
+
+            // Trainable parameters.
+            float* params_full_precision = nullptr;
+            std::uint16_t* params        = nullptr;
+            float* param_gradients       = nullptr;
+
+            // Optimizer.
+            float* optimizer_first_moments       = nullptr;
+            float* optimizer_second_moments      = nullptr;
+            std::uint32_t* optimizer_param_steps = nullptr;
+
+            // Evaluation.
+            std::uint32_t* evaluation_numsteps        = nullptr;
+            std::uint32_t* evaluation_sample_counter  = nullptr;
+            std::uint32_t* evaluation_overflow_counter = nullptr;
+            double* evaluation_loss_sum               = nullptr;
+            std::uint8_t* evaluation_pixels           = nullptr;
         } device;
     };
 } // namespace hyfluid::train

@@ -62,6 +62,11 @@ function(download_if_needed url out_path)
     endif ()
 endfunction()
 
+download_if_needed(
+        "https://raw.githubusercontent.com/nothings/stb/28d546d5eb77d4585506a20480f4de2e706dff4c/stb_image_write.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/vendor/stb/stb_image_write.h"
+)
+
 # ============================================================================
 # Core Library
 # ============================================================================
@@ -81,7 +86,8 @@ target_sources(
         hyfluid.train.ixx
         hyfluid.inspector.ixx
 )
-target_link_libraries(libhyfluid PRIVATE CUDA::cudart)
+target_link_libraries(libhyfluid PRIVATE CUDA::cudart CUDA::cublas CUDA::cublasLt)
+target_include_directories(libhyfluid PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/vendor")
 set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 
 

@@ -33,18 +33,32 @@ import std;
 
 namespace hyfluid::project {
     namespace {
+        constexpr std::uint32_t viewport_depth_tested = 0u;
         constexpr char section_dataset_id[] = "dataset";
+        constexpr char section_domain_id[] = "domain";
         constexpr char section_timeline_id[] = "timeline";
+        constexpr char section_field_id[] = "field";
         constexpr char section_sampler_id[] = "sampler";
         constexpr char section_diagnostics_id[] = "diagnostics";
+        constexpr char setting_show_field_domain_key[] = "show_field_domain";
+        constexpr char setting_show_active_domain_key[] = "show_active_domain";
+        constexpr char setting_show_volume_key[] = "show_volume";
+        constexpr char setting_show_occupancy_key[] = "show_occupancy";
+        constexpr char setting_occupancy_alpha_key[] = "occupancy_alpha";
+        constexpr char setting_occupancy_cell_scale_key[] = "occupancy_cell_scale";
         constexpr char setting_show_sampler_key[] = "show_sampler";
         constexpr char setting_show_sampler_points_key[] = "show_sampler_points";
         constexpr char setting_show_sampler_rays_key[] = "show_sampler_rays";
         constexpr char setting_sampler_point_radius_key[] = "sampler_point_radius";
         constexpr char setting_sampler_ray_width_key[] = "sampler_ray_width";
+        constexpr char density_volume_name[] = "HyFluid Density";
+        constexpr char density_material_name[] = "HyFluid Density Material";
+        constexpr char density_light_name[] = "HyFluid Density Key Light";
         constexpr char sampler_point_cloud_name[] = "HyFluid Sampler Samples";
         constexpr char sampler_ray_segments_name[] = "HyFluid Sampler Rays";
         constexpr char sampler_material_name[] = "HyFluid Sampler Point Material";
+        constexpr char field_domain_name[] = "HyFluid Field Domain";
+        constexpr char active_domain_name[] = "HyFluid Active Domain";
 
         struct Vector3 final {
             float x{};
@@ -67,9 +81,15 @@ namespace hyfluid::project {
         };
 
         struct DebugOptions final {
+            bool show_field_domain{true};
+            bool show_active_domain{true};
+            bool show_volume{true};
+            bool show_occupancy{false};
             bool show_sampler{false};
             bool show_sampler_points{true};
             bool show_sampler_rays{true};
+            float occupancy_alpha{0.18f};
+            float occupancy_cell_scale{0.75f};
             float sampler_point_radius{0.002f};
             float sampler_ray_width{1.5f};
         };
@@ -257,7 +277,7 @@ namespace hyfluid::project {
 
         [[nodiscard]] plugin::Camera overview_camera() {
             constexpr Vector3 overview_target{0.5f, 0.5f, 0.5f};
-            constexpr Vector3 overview_eye{0.5f, 1.55f, -1.65f};
+            constexpr Vector3 overview_eye{0.5f, 1.55f, 2.65f};
             constexpr Vector3 overview_up{0.0f, 1.0f, 0.0f};
             const Vector3 overview_forward = normalize(subtract(overview_target, overview_eye), "overview camera forward");
             const Vector3 overview_down = multiply(overview_up, -1.0f);
@@ -358,15 +378,25 @@ namespace hyfluid::project {
         std::shared_ptr<plugin::HostServices> host_services;
         std::vector<FrameSetRuntime> frame_sets;
         std::optional<train::OptimizationStats> latest_stats;
+        std::optional<inspector::DensitySliceSampleStats> latest_density_stats;
+        ExternalGpuBuffer density_buffer{};
+        ExternalGpuBuffer occupancy_buffer{};
+        std::optional<plugin::VolumeGrid> density_volume{};
+        std::optional<plugin::ViewportVoxelGrid> occupancy_grid{};
         ExternalGpuBuffer sampler_points_buffer{};
         ExternalGpuBuffer sampler_segments_buffer{};
         std::optional<plugin::PointCloud> sampler_point_cloud{};
         std::optional<plugin::ViewportSegmentSet> sampler_ray_segments{};
+        std::optional<plugin::ViewportSegmentSet> field_domain_segments{};
+        std::optional<plugin::ViewportSegmentSet> active_domain_segments{};
         plugin::DebugAttachmentSet debug_attachments{};
         std::uint64_t pixel_bytes{};
         std::uint64_t loaded_frame_count{};
         std::uint64_t timeline_frame_count{};
         std::uint64_t scene_revision{1u};
+        std::uint64_t exported_density_revision{};
+        std::uint64_t exported_density_byte_size{};
+        std::uint64_t exported_occupancy_revision{};
         std::uint64_t exported_sampler_revision{};
         std::uint32_t exported_sampler_point_count{};
         std::uint32_t exported_sampler_ray_count{};
@@ -472,17 +502,255 @@ namespace hyfluid::project {
     }
 
     namespace {
+        [[nodiscard]] std::array<float, 3u> field_to_scene_point(const std::array<float, 3u>& value) {
+            return {value[2u], value[1u], value[0u]};
+        }
+
+        [[nodiscard]] plugin::ViewportSegment segment(const std::array<float, 3u>& start, const std::array<float, 3u>& end) {
+            return plugin::ViewportSegment{
+                .start = start,
+                .end = end,
+            };
+        }
+
+        [[nodiscard]] plugin::ViewportSegmentSet domain_box(std::string name, const std::array<float, 3u>& field_min, const std::array<float, 3u>& field_max, const std::array<float, 4u>& color, const float width) {
+            const std::array<float, 3u> minimum = field_to_scene_point(field_min);
+            const std::array<float, 3u> maximum = field_to_scene_point(field_max);
+            const std::array corners = {
+                std::array<float, 3u>{minimum[0u], minimum[1u], minimum[2u]},
+                std::array<float, 3u>{maximum[0u], minimum[1u], minimum[2u]},
+                std::array<float, 3u>{maximum[0u], maximum[1u], minimum[2u]},
+                std::array<float, 3u>{minimum[0u], maximum[1u], minimum[2u]},
+                std::array<float, 3u>{minimum[0u], minimum[1u], maximum[2u]},
+                std::array<float, 3u>{maximum[0u], minimum[1u], maximum[2u]},
+                std::array<float, 3u>{maximum[0u], maximum[1u], maximum[2u]},
+                std::array<float, 3u>{minimum[0u], maximum[1u], maximum[2u]},
+            };
+            return plugin::ViewportSegmentSet{
+                .name = std::move(name),
+                .owner = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::Camera, .name = "Overview"},
+                .segments = {
+                    segment(corners[0u], corners[1u]),
+                    segment(corners[1u], corners[2u]),
+                    segment(corners[2u], corners[3u]),
+                    segment(corners[3u], corners[0u]),
+                    segment(corners[4u], corners[5u]),
+                    segment(corners[5u], corners[6u]),
+                    segment(corners[6u], corners[7u]),
+                    segment(corners[7u], corners[4u]),
+                    segment(corners[0u], corners[4u]),
+                    segment(corners[1u], corners[5u]),
+                    segment(corners[2u], corners[6u]),
+                    segment(corners[3u], corners[7u]),
+                },
+                .colors = {
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                    plugin::Color{.value = color},
+                },
+                .source_kind = plugin::ViewportSegmentSourceKind::Values,
+                .width = width,
+                .width_mode = plugin::ViewportSegmentWidthMode::Screen,
+                .depth_mode = plugin::ViewportSegmentDepthMode::Overlay,
+            };
+        }
+
+        [[nodiscard]] std::string_view occupancy_state_label(const inspector::OccupancyGridState state) {
+            switch (state) {
+            case inspector::OccupancyGridState::Full:
+                return "full";
+            case inspector::OccupancyGridState::Static:
+                return "static";
+            case inspector::OccupancyGridState::Learned:
+                return "learned";
+            }
+            throw std::runtime_error{"unknown HyFluid occupancy grid state."};
+        }
+
+        void rebuild_debug_attachments(Project::State& state) {
+            state.debug_attachments.viewport_voxel_grids.clear();
+            if (state.occupancy_grid.has_value()) state.debug_attachments.viewport_voxel_grids.push_back(*state.occupancy_grid);
+
+            state.debug_attachments.viewport_segment_sets.clear();
+            if (state.field_domain_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.field_domain_segments);
+            if (state.active_domain_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.active_domain_segments);
+            if (state.sampler_ray_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.sampler_ray_segments);
+        }
+
+        void publish_domain_visualization_if_ready(Project::State& state) {
+            state.field_domain_segments.reset();
+            state.active_domain_segments.reset();
+            if (state.trainer == nullptr || (!state.debug.show_field_domain && !state.debug.show_active_domain)) {
+                rebuild_debug_attachments(state);
+                return;
+            }
+
+            const inspector::Inspector inspector{*state.trainer};
+            const inspector::TrainingDomainView domain = inspector.training_domain_view();
+            if (domain.coordinate_space != inspector::TrainingCoordinateSpace::Field) throw std::runtime_error{"HyFluid visualization only supports Field Space domain views."};
+            if (state.debug.show_field_domain) {
+                state.field_domain_segments = domain_box(field_domain_name, domain.field_min, domain.field_max, {0.20f, 0.58f, 1.0f, 0.88f}, 1.25f);
+            }
+            if (state.debug.show_active_domain) {
+                state.active_domain_segments = domain_box(active_domain_name, domain.field_min, domain.field_max, {0.30f, 1.0f, 0.52f, 0.88f}, 2.0f);
+            }
+            rebuild_debug_attachments(state);
+        }
+
+        void reset_occupancy_visualization(Project::State& state, const bool release_buffer) noexcept {
+            state.occupancy_grid.reset();
+            state.exported_occupancy_revision = 0u;
+            if (release_buffer) state.occupancy_buffer.reset();
+            rebuild_debug_attachments(state);
+        }
+
+        void reset_density_visualization(Project::State& state, const bool release_buffer) noexcept {
+            state.density_volume.reset();
+            state.latest_density_stats.reset();
+            state.exported_density_revision = 0u;
+            state.exported_density_byte_size = 0u;
+            reset_occupancy_visualization(state, false);
+            if (release_buffer) state.density_buffer.reset();
+        }
+
+        [[nodiscard]] bool density_volume_visible(const Project::State& state) {
+            return state.debug.show_volume && state.density_volume.has_value();
+        }
+
+        void publish_density_slice_if_ready(Project::State& state, const std::uint64_t timeline_frame_index) {
+            if (!state.debug.show_volume || state.trainer == nullptr || !state.latest_stats.has_value()) {
+                reset_density_visualization(state, false);
+                return;
+            }
+
+            if (state.timeline_frame_count == 0u || state.timeline_frame_count > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"HyFluid density slice timeline frame count is invalid."};
+            if (timeline_frame_index >= state.timeline_frame_count) throw std::runtime_error{"HyFluid density slice frame index is outside timeline."};
+
+            const std::uint64_t dimension = inspector::DensitySliceDimension;
+            if (dimension > std::numeric_limits<std::uint64_t>::max() / dimension / dimension) throw std::runtime_error{"HyFluid density slice dimensions overflow cell count."};
+            const std::uint64_t cell_count = dimension * dimension * dimension;
+            if (cell_count > std::numeric_limits<std::uint64_t>::max() / sizeof(float)) throw std::runtime_error{"HyFluid density slice byte size overflows uint64."};
+            const std::uint64_t byte_size = cell_count * sizeof(float);
+            const std::uint64_t expected_revision = (static_cast<std::uint64_t>(state.latest_stats->step) << 32u) | timeline_frame_index;
+            if (state.density_volume.has_value() && state.exported_density_revision == expected_revision) return;
+
+            state.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, byte_size, "hyfluid density time slice", "density volume");
+            float* const density_values = state.density_buffer.mapped_as<float>();
+            if (density_values == nullptr) throw std::runtime_error{"HyFluid density volume external buffer was not mapped."};
+
+            const inspector::Inspector inspector{*state.trainer};
+            const std::array<std::uint32_t, 3u> dimensions{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension};
+            const std::expected<inspector::DensitySliceSampleStats, std::string> stats = inspector.sample_density_slice(inspector::DensitySliceSampleRequest{
+                .dimensions = dimensions,
+                .time_count = static_cast<std::uint32_t>(state.timeline_frame_count),
+                .time_index = static_cast<std::uint32_t>(timeline_frame_index),
+                .output_density = density_values,
+                .byte_size = byte_size,
+                .encoding = inspector::DensitySliceEncoding::MortonFloat32,
+            });
+            if (!stats) throw std::runtime_error{stats.error()};
+            if (stats->dimensions != dimensions) throw std::runtime_error{"HyFluid density slice returned unexpected dimensions."};
+            if (stats->byte_size != byte_size) throw std::runtime_error{"HyFluid density slice returned unexpected byte size."};
+            if (stats->encoding != inspector::DensitySliceEncoding::MortonFloat32) throw std::runtime_error{"HyFluid density slice returned unexpected encoding."};
+            state.latest_density_stats = *stats;
+
+            state.density_volume = plugin::VolumeGrid{
+                .name = density_volume_name,
+                .dimensions = dimensions,
+                .origin = {0.0f, 0.0f, 0.0f},
+                .voxel_size = {
+                    1.0f / static_cast<float>(dimensions[0u]),
+                    1.0f / static_cast<float>(dimensions[1u]),
+                    1.0f / static_cast<float>(dimensions[2u]),
+                },
+                .channels = {
+                    plugin::VolumeChannel{
+                        .name = "density",
+                        .dimensions = dimensions,
+                        .format = plugin::VolumeChannelFormat::Float32,
+                        .source_kind = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
+                        .index_encoding = plugin::VolumeChannelIndexEncoding::Morton3D,
+                        .buffer_id = state.density_buffer.resource_id(),
+                        .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
+                        .source_byte_size = stats->byte_size,
+                        .revision = stats->revision,
+                    },
+                },
+                .material_name = density_material_name,
+            };
+            state.exported_density_revision = stats->revision;
+            state.exported_density_byte_size = stats->byte_size;
+        }
+
+        void publish_occupancy_grid_if_ready(Project::State& state) {
+            if (!state.debug.show_volume || !state.debug.show_occupancy || state.trainer == nullptr || !state.density_volume.has_value()) {
+                reset_occupancy_visualization(state, false);
+                return;
+            }
+
+            const inspector::Inspector inspector{*state.trainer};
+            const inspector::OccupancyGridDeviceView view = inspector.occupancy_grid_device_view();
+            if (!view.initialized) {
+                reset_occupancy_visualization(state, false);
+                return;
+            }
+            if (view.encoding != inspector::OccupancyGridEncoding::MortonBitfield) throw std::runtime_error{"Unsupported HyFluid occupancy grid encoding."};
+            if (view.bitfield == nullptr || view.bitfield_bytes == 0u) throw std::runtime_error{"HyFluid occupancy grid bitfield view is empty."};
+            if (view.bitfield_bytes % sizeof(std::uint32_t) != 0u) throw std::runtime_error{"HyFluid occupancy grid bitfield byte size must be uint32 aligned for Spectra visualization."};
+            if (view.dimensions != std::array{inspector::DensitySliceDimension, inspector::DensitySliceDimension, inspector::DensitySliceDimension}) throw std::runtime_error{"HyFluid occupancy grid dimensions do not match density slice dimensions."};
+            if (state.exported_occupancy_revision == view.revision && state.occupancy_grid.has_value()) {
+                state.occupancy_grid->color = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha};
+                state.occupancy_grid->cell_scale = state.debug.occupancy_cell_scale;
+                rebuild_debug_attachments(state);
+                return;
+            }
+
+            state.occupancy_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, view.bitfield_bytes, "hyfluid occupancy grid bitfield", "occupancy grid");
+            std::uint8_t* const occupancy_bitfield = state.occupancy_buffer.mapped_as<std::uint8_t>();
+            if (occupancy_bitfield == nullptr) throw std::runtime_error{"HyFluid occupancy grid bitfield external buffer was not mapped."};
+            if (const cudaError_t status = cudaMemcpy(occupancy_bitfield, view.bitfield, view.bitfield_bytes, cudaMemcpyDeviceToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy HyFluid occupancy grid bitfield failed: "} + cudaGetErrorString(status)};
+            if (const cudaError_t status = cudaDeviceSynchronize(); status != cudaSuccess) throw std::runtime_error{std::string{"cudaDeviceSynchronize after HyFluid occupancy grid export failed: "} + cudaGetErrorString(status)};
+
+            const float voxel_size = 1.0f / static_cast<float>(view.dimensions[0u]);
+            state.exported_occupancy_revision = view.revision;
+            state.occupancy_grid = plugin::ViewportVoxelGrid{
+                .name = "HyFluid Occupancy Grid",
+                .owner = plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::VolumeGrid, .name = density_volume_name},
+                .dimensions = view.dimensions,
+                .origin = {0.0f, 0.0f, 0.0f},
+                .voxel_size = {voxel_size, voxel_size, voxel_size},
+                .color = {0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha},
+                .cell_scale = state.debug.occupancy_cell_scale,
+                .depth_mode = viewport_depth_tested,
+                .source_kind = plugin::ViewportVoxelGridSourceKind::Bitfield,
+                .index_encoding = plugin::ViewportVoxelGridIndexEncoding::Morton3D,
+                .buffer_id = state.occupancy_buffer.resource_id(),
+                .source_byte_size = view.bitfield_bytes,
+                .revision = view.revision,
+            };
+            rebuild_debug_attachments(state);
+        }
+
         void reset_sampler_visualization(Project::State& state, const bool release_buffers) noexcept {
             state.sampler_point_cloud.reset();
             state.sampler_ray_segments.reset();
             state.exported_sampler_revision = 0u;
             state.exported_sampler_point_count = 0u;
             state.exported_sampler_ray_count = 0u;
-            state.debug_attachments.viewport_segment_sets.clear();
             if (release_buffers) {
                 state.sampler_points_buffer.reset();
                 state.sampler_segments_buffer.reset();
             }
+            rebuild_debug_attachments(state);
         }
 
         void publish_sampler_visualization_if_ready(Project::State& state, const std::uint64_t timeline_frame_index) {
@@ -549,7 +817,6 @@ namespace hyfluid::project {
             state.exported_sampler_ray_count = state.debug.show_sampler_rays ? stats->ray_count : 0u;
             state.sampler_point_cloud.reset();
             state.sampler_ray_segments.reset();
-            state.debug_attachments.viewport_segment_sets.clear();
             if (needs_point_cloud && stats->point_count != 0u) {
                 state.sampler_point_cloud = plugin::PointCloud{
                     .name = sampler_point_cloud_name,
@@ -581,7 +848,7 @@ namespace hyfluid::project {
                 };
             }
 
-            if (state.sampler_ray_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.sampler_ray_segments);
+            rebuild_debug_attachments(state);
         }
     }
 
@@ -597,7 +864,9 @@ namespace hyfluid::project {
             .open_action_label = "Open Dataset",
             .sections = {
                 plugin::section(section_dataset_id, "Dataset"),
+                plugin::section(section_domain_id, "Domain"),
                 plugin::section(section_timeline_id, "Timeline"),
+                plugin::section(section_field_id, "Field"),
                 plugin::section(section_sampler_id, "Sampler"),
                 plugin::section(section_diagnostics_id, "Diagnostics"),
             },
@@ -609,6 +878,12 @@ namespace hyfluid::project {
                 plugin::unsigned_integer("max_views", "Max Views", 0u).describe("0 means no view count limit.").section(section_dataset_id),
             },
             .settings = {
+                plugin::toggle(setting_show_field_domain_key, "Show Field Domain", true, &Project::set_show_field_domain).section(section_domain_id),
+                plugin::toggle(setting_show_active_domain_key, "Show Active Domain", true, &Project::set_show_active_domain).section(section_domain_id),
+                plugin::toggle(setting_show_volume_key, "Show Volume", true, &Project::set_show_volume).section(section_field_id),
+                plugin::toggle(setting_show_occupancy_key, "Show Occupancy", false, &Project::set_show_occupancy).section(section_field_id),
+                plugin::float_value(setting_occupancy_alpha_key, "Occupancy Alpha", 0.18f, &Project::set_occupancy_alpha).section(section_field_id).slider(0.0f, 1.0f, 0.01f),
+                plugin::float_value(setting_occupancy_cell_scale_key, "Cell Scale", 0.75f, &Project::set_occupancy_cell_scale).section(section_field_id).slider(0.05f, 1.0f, 0.05f),
                 plugin::toggle(setting_show_sampler_key, "Show Sampler", false, &Project::set_show_sampler).section(section_sampler_id),
                 plugin::toggle(setting_show_sampler_points_key, "Show Sampler Points", true, &Project::set_show_sampler_points).section(section_sampler_id),
                 plugin::toggle(setting_show_sampler_rays_key, "Show Sampler Rays", true, &Project::set_show_sampler_rays).section(section_sampler_id),
@@ -703,7 +978,14 @@ namespace hyfluid::project {
         if (!stats) throw std::runtime_error{stats.error()};
         this->state->latest_stats = *stats;
         scene_changed = true;
+        publish_domain_visualization_if_ready(*this->state);
+        const std::uint64_t previous_density_revision = this->state->exported_density_revision;
+        const std::uint64_t previous_occupancy_revision = this->state->exported_occupancy_revision;
         const std::uint64_t previous_sampler_revision = this->state->exported_sampler_revision;
+        publish_density_slice_if_ready(*this->state, update.timeline_frame_index);
+        if (this->state->exported_density_revision != previous_density_revision) scene_changed = true;
+        publish_occupancy_grid_if_ready(*this->state);
+        if (this->state->exported_occupancy_revision != previous_occupancy_revision) scene_changed = true;
         publish_sampler_visualization_if_ready(*this->state, update.timeline_frame_index);
         if (this->state->exported_sampler_revision != previous_sampler_revision) scene_changed = true;
         if (scene_changed) ++this->state->scene_revision;
@@ -717,6 +999,24 @@ namespace hyfluid::project {
     void Project::write_document(plugin::SceneBuilder& scene) const {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
         std::vector<plugin::Material> materials{};
+        std::vector<plugin::Light> lights{};
+        if (this->state->debug.show_volume) {
+            materials.push_back(plugin::Material{
+                .name = density_material_name,
+                .model = "volume",
+                .alpha_mode = "blend",
+                .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
+                .roughness = 0.35f,
+                .volume_density_scale = static_cast<float>(inspector::DensitySliceDimension),
+                .volume_temperature_scale = 1.0f,
+            });
+            lights.push_back(plugin::Light{
+                .name = density_light_name,
+                .kind = "directional",
+                .color = {1.0f, 1.0f, 1.0f},
+                .intensity = 3.0f,
+            });
+        }
         if (this->state->debug.show_sampler && this->state->debug.show_sampler_points) {
             materials.push_back(plugin::Material{
                 .name = sampler_material_name,
@@ -736,8 +1036,16 @@ namespace hyfluid::project {
                 .initial_running = false,
                 .step_delta_seconds = 1.0 / 60.0,
             },
+            .navigation_target = plugin::ViewportNavigationTarget{
+                .revision = 1u,
+                .focus = {0.5f, 0.5f, 0.5f},
+                .bounds_minimum = {0.0f, 0.0f, 0.0f},
+                .bounds_maximum = {1.0f, 1.0f, 1.0f},
+                .navigation_up = {0.0f, 1.0f, 0.0f},
+            },
             .active_camera_name = "Overview",
             .materials = std::move(materials),
+            .lights = std::move(lights),
         });
     }
 
@@ -746,6 +1054,9 @@ namespace hyfluid::project {
         if (!std::isfinite(frame.delta_seconds) || frame.delta_seconds < 0.0) throw std::runtime_error{"HyFluid project frame delta time is invalid."};
         if (!std::isfinite(frame.time_seconds) || frame.time_seconds < 0.0) throw std::runtime_error{"HyFluid project frame time is invalid."};
         if (frame.frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project frame index is outside indexed timeline."};
+        publish_domain_visualization_if_ready(*this->state);
+        publish_density_slice_if_ready(*this->state, frame.frame_index);
+        publish_occupancy_grid_if_ready(*this->state);
         publish_sampler_visualization_if_ready(*this->state, frame.frame_index);
         const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
         plugin::Document document{
@@ -764,6 +1075,9 @@ namespace hyfluid::project {
         if (this->state->sampler_point_cloud.has_value()) {
             document.point_clouds.push_back(*this->state->sampler_point_cloud);
         }
+        if (density_volume_visible(*this->state)) {
+            document.volumes.push_back(*this->state->density_volume);
+        }
         scene.set_document(std::move(document));
     }
 
@@ -771,8 +1085,8 @@ namespace hyfluid::project {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
 
         controls.phase(this->state->host_update_running ? "Running" : "Paused")
-            .headline(this->state->latest_stats.has_value() ? "Sampler running" : "ScalarReal dataset loaded")
-            .message(this->state->latest_stats.has_value() ? "HyFluid sampler-only batches advance on Spectra update ticks." : "Update clock is paused before the first sampler batch.");
+            .headline(this->state->latest_stats.has_value() ? "Density training running" : "ScalarReal dataset loaded")
+            .message(this->state->latest_stats.has_value() ? "HyFluid density-stage batches advance on Spectra update ticks." : "Update clock is paused before the first density batch.");
         controls.metric("dataset", "Dataset", this->state->dataset_options.dataset_path.filename().string()).section(section_dataset_id).display_primary().color({0.55f, 0.85f, 1.0f, 1.0f});
         controls.metric("frame_sets", "Frame Sets", joined_frame_sets(this->state->dataset_options.frame_sets)).section(section_dataset_id);
         controls.metric("frame_set_count", "Frame Set Count", static_cast<std::uint64_t>(this->state->dataset.frame_sets.size())).section(section_dataset_id);
@@ -785,16 +1099,94 @@ namespace hyfluid::project {
             controls.metric(std::format("frame_set_{}", frame_set.name), frame_set.name, std::format("{} views x {} times | {}x{}", frame_set.view_count, frame_set.time_count, frame_set.width, frame_set.height)).section(section_timeline_id);
         }
 
+        const inspector::TrainingDomainView domain = inspector::Inspector{*this->state->trainer}.training_domain_view();
+        const float minimum_metric_extent = std::min({domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u]});
+        if (!std::isfinite(minimum_metric_extent) || minimum_metric_extent <= 0.0f) throw std::runtime_error{"HyFluid field metric extent is invalid."};
+        controls.metric("coordinate_space", "Coordinate Space", "Field [0,1]^3").section(section_domain_id).display_primary().color({0.20f, 0.58f, 1.0f, 1.0f});
+        controls.metric("field_domain", "Field Domain", this->state->field_domain_segments.has_value() ? "visible" : "hidden").section(section_domain_id);
+        controls.metric("active_domain", "Active Domain", this->state->active_domain_segments.has_value() ? "visible" : "hidden").section(section_domain_id);
+        controls.metric("metric_extent", "Metric Extent", std::format("{:.5f}, {:.5f}, {:.5f}", domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u])).section(section_domain_id);
+        controls.metric("metric_aspect", "Aspect", std::format("{:.3f} : {:.3f} : {:.3f}", domain.field_metric_extent[0u] / minimum_metric_extent, domain.field_metric_extent[1u] / minimum_metric_extent, domain.field_metric_extent[2u] / minimum_metric_extent)).section(section_domain_id);
+        controls.metric("occupancy_state", "Occupancy State", std::string{occupancy_state_label(domain.occupancy_state)}).section(section_field_id);
+
+        const std::string volume_state = density_volume_visible(*this->state) ? "visible" : this->state->latest_stats.has_value() ? "hidden" : "pending";
+        controls.metric("density_volume", "Volume", volume_state).section(section_field_id);
+        controls.metric("occupancy_grid", "Occupancy", this->state->debug.show_volume && this->state->occupancy_grid.has_value() ? "visible" : "hidden").section(section_field_id);
+        if (this->state->latest_density_stats.has_value()) {
+            const inspector::DensitySliceSampleStats& stats = *this->state->latest_density_stats;
+            controls.metric("density_min", "Density Min", std::format("{:.6g}", stats.density_min)).section(section_field_id);
+            controls.metric("density_max", "Density Max", std::format("{:.6g}", stats.density_max)).section(section_field_id);
+            controls.metric("density_mean", "Density Mean", std::format("{:.6g}", stats.density_mean)).section(section_field_id);
+            controls.metric("density_nonzero", "Density Nonzero", std::format("{} / {}", stats.density_nonzero_count, static_cast<std::uint64_t>(stats.dimensions[0u]) * stats.dimensions[1u] * stats.dimensions[2u])).section(section_field_id);
+        }
+        if (this->state->density_volume.has_value()) {
+            controls.metric("density_volume_bytes", "Volume MiB", static_cast<double>(this->state->exported_density_byte_size) / 1048576.0).section(section_field_id);
+            controls.metric("density_revision", "Density Rev", this->state->exported_density_revision).section(section_diagnostics_id);
+        }
+        if (this->state->occupancy_grid.has_value()) controls.metric("occupancy_revision", "Occupancy Rev", this->state->exported_occupancy_revision).section(section_diagnostics_id);
         controls.metric("sampler_points", "Points", std::format("{} ({})", this->state->sampler_point_cloud.has_value() ? "visible" : "hidden", this->state->exported_sampler_point_count)).section(section_sampler_id);
         controls.metric("sampler_rays", "Rays", std::format("{} ({})", this->state->sampler_ray_segments.has_value() ? "visible" : "hidden", this->state->exported_sampler_ray_count)).section(section_sampler_id);
+        controls.metric("sampler_revision", "Sampler Rev", this->state->exported_sampler_revision).section(section_sampler_id);
         if (this->state->latest_stats.has_value()) {
             const train::OptimizationStats& stats = *this->state->latest_stats;
             controls.metric("step", "Step", stats.step).section(section_sampler_id).display_primary().color({0.16f, 0.86f, 0.55f, 1.0f});
-            controls.metric("rays", "Rays", std::format("{}/{}", stats.ray_count, stats.rays_per_batch)).section(section_sampler_id);
-            controls.metric("samples", "Samples", stats.sample_count).section(section_sampler_id);
+            controls.metric("loss", "Loss", std::format("{:.6g}", stats.loss)).section(section_sampler_id);
+            controls.metric("psnr", "PSNR", std::format("{:.3f}", stats.psnr)).section(section_sampler_id);
+            controls.metric("last_batch_rays", "Last Batch Rays", std::format("{}/{}", stats.ray_count, stats.rays_per_batch)).section(section_sampler_id);
+            controls.metric("filtered_rays", "Filtered Rays", this->state->exported_sampler_ray_count).section(section_sampler_id);
+            controls.metric("filtered_samples", "Filtered Samples", this->state->exported_sampler_point_count).section(section_sampler_id);
+            controls.metric("samples", "Samples", std::format("{}/{}", stats.sample_count, stats.sample_count_before_compaction)).section(section_diagnostics_id);
             controls.metric("sample_eff", "Sample Eff", std::format("{:.2f}%", stats.sample_efficiency_ratio * 100.0f)).section(section_sampler_id);
             controls.metric("occupancy", "Occupancy", std::format("{:.2f}%", stats.occupancy_grid_ratio * 100.0f)).section(section_sampler_id);
         }
+    }
+
+    void Project::set_show_field_domain(const bool value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (this->state->debug.show_field_domain == value) return;
+        this->state->debug.show_field_domain = value;
+        publish_domain_visualization_if_ready(*this->state);
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_show_active_domain(const bool value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (this->state->debug.show_active_domain == value) return;
+        this->state->debug.show_active_domain = value;
+        publish_domain_visualization_if_ready(*this->state);
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_show_volume(const bool value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (this->state->debug.show_volume == value) return;
+        this->state->debug.show_volume = value;
+        reset_density_visualization(*this->state, false);
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_show_occupancy(const bool value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (this->state->debug.show_occupancy == value) return;
+        this->state->debug.show_occupancy = value;
+        if (!value) reset_occupancy_visualization(*this->state, true);
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_occupancy_alpha(const float value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (value < 0.0f || value > 1.0f) throw std::runtime_error{"HyFluid occupancy alpha must be in [0, 1]."};
+        if (this->state->debug.occupancy_alpha == value) return;
+        this->state->debug.occupancy_alpha = value;
+        ++this->state->scene_revision;
+    }
+
+    void Project::set_occupancy_cell_scale(const float value) {
+        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
+        if (!(value > 0.0f) || value > 1.0f) throw std::runtime_error{"HyFluid occupancy cell scale must be in (0, 1]."};
+        if (this->state->debug.occupancy_cell_scale == value) return;
+        this->state->debug.occupancy_cell_scale = value;
+        ++this->state->scene_revision;
     }
 
     void Project::set_show_sampler(const bool value) {
@@ -835,6 +1227,6 @@ namespace hyfluid::project {
     }
 } // namespace hyfluid::project
 
-extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v16(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
+extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v17(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
     return hyfluid::plugin::export_plugin<hyfluid::project::Project>();
 }

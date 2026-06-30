@@ -23,6 +23,12 @@ export namespace hyfluid::project {
         void write_frame(plugin::SceneBuilder& scene, plugin::FrameInfo frame);
         void write_controls(plugin::ControlBuilder& controls) const;
 
+        void set_show_field_domain(bool value);
+        void set_show_active_domain(bool value);
+        void set_show_volume(bool value);
+        void set_show_occupancy(bool value);
+        void set_occupancy_alpha(float value);
+        void set_occupancy_cell_scale(float value);
         void set_show_sampler(bool value);
         void set_show_sampler_points(bool value);
         void set_show_sampler_rays(bool value);
