@@ -117,9 +117,11 @@ export namespace hyfluid::plugin {
         std::string value{};
     };
 
+    struct HostServices;
+
     struct OpenContext {
         std::vector<Option> options{};
-        std::shared_ptr<struct HostServices> host_services{};
+        std::shared_ptr<HostServices> host_services{};
     };
 
     struct ActionContext {
