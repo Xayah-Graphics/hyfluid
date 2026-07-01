@@ -1,0 +1,64 @@
+name: Documentation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/documentation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile documentation (Tectonic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Prepare Arch keyring + update system
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+
+      - name: Install documentation dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pacman -S --noconfirm --needed \
+            ca-certificates git \
+            tectonic
+          pacman -Scc --noconfirm || true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tectonic sanity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          tectonic --version
+
+      - name: Compile documentation
+        shell: bash
+        working-directory: docs
+        run: |
+          set -euxo pipefail
+          tectonic -X compile documentation.tex

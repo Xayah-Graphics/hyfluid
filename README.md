@@ -2,6 +2,7 @@
 
 [![Arch Linux](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/arch-build.yml/badge.svg)](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/arch-build.yml)
 [![Windows](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/windows-build.yml/badge.svg)](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/windows-build.yml)
+[![Documentation](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/documentation.yml/badge.svg)](https://github.com/Xayah-Graphics/hyfluid/actions/workflows/documentation.yml)
 
 ## 1. Algorithm Pipeline
 
