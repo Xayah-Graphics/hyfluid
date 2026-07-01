@@ -1,7 +1,7 @@
-\documentclass[11pt]{article}
+\documentclass[10pt,twocolumn]{article}
 
 % Page layout
-\usepackage[a4paper, margin=2.4cm]{geometry}
+\usepackage[a4paper, margin=1.8cm, columnsep=0.65cm]{geometry}
 
 % Math
 \usepackage{amsmath}
@@ -12,6 +12,7 @@
 
 % Tables
 \usepackage{booktabs}
+\usepackage{tabularx}
 
 % Typography
 \usepackage{lmodern}
@@ -30,15 +31,12 @@
     \maketitle
 
     \begin{abstract}
-        TODO.
+        TODO
     \end{abstract}
 
-    \tableofcontents
-    \newpage
+    \input{dataset_preparation}
 
-    \section{TODO}
-
-% \bibliographystyle{plain}
-% \bibliography{refs}
+    \bibliographystyle{plain}
+    \bibliography{refs}
 
 \end{document}

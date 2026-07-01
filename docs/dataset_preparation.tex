@@ -1,0 +1,75 @@
+\section{Dataset Preparation}\label{sec:dataset-preparation}
+
+\subsection{ScalarReal Dataset}\label{subsec:scalarreal-dataset}
+
+ScalarReal is the local ScalarFlow video subset used by this project: five camera videos plus \texttt{info.json}. ScalarFlow is Eckert, Um, and Thuerey's real-world scalar-transport dataset; the official release contains 104 reconstructions with 150 frames of 3D density, 3D velocity, rendered images, and input images~\cite{eckert2019scalarflow,scalarflowData2019}. Tables follow JSON field order.
+
+\noindent\textbf{Split fields.}
+
+\begin{center}
+    \begingroup
+    \scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabularx}{\columnwidth}{@{}llXcc@{}}
+        \toprule
+        \textbf{Split} & \textbf{Source field} & \textbf{Files} & \textbf{Views} & \textbf{Frames/view} \\
+        \midrule
+        train & \texttt{train\_videos} & \texttt{train00,01,03,04} & 4 & 120 \\
+        test & \texttt{test\_videos} & \texttt{train02} & 1 & 120 \\
+        \bottomrule
+    \end{tabularx}
+    \par\smallskip
+    \footnotesize\textbf{Table 1:} ScalarReal split fields.
+    \endgroup
+\end{center}
+
+\noindent\textbf{Per-video fields.}
+
+\begin{center}
+    \begingroup
+    \scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabularx}{\columnwidth}{@{}llX@{}}
+        \toprule
+        \textbf{Field} & \textbf{Value} & \textbf{Dataset meaning} \\
+        \midrule
+        \texttt{file\_name} & per video & video file path \\
+        \texttt{frame\_rate} & 30 & video FPS \\
+        \texttt{frame\_num} & 120 & video length \\
+        \texttt{camera\_angle\_x} & per video & horizontal FOV \\
+        \texttt{camera\_hw} & \([1920,1080]\) & image \([H,W]\) \\
+        \texttt{transform\_matrix} & per video & camera pose \\
+        \bottomrule
+    \end{tabularx}
+    \par\smallskip
+    \footnotesize\textbf{Table 2:} Per-video fields.
+    \endgroup
+\end{center}
+
+\noindent\textbf{Global fields.}
+
+\begin{center}
+    \begingroup
+    \scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabularx}{\columnwidth}{@{}llX@{}}
+        \toprule
+        \textbf{Field} & \textbf{Value} & \textbf{Dataset meaning} \\
+        \midrule
+        \texttt{frame\_bkg\_color} & \([0,0,0]\) & background color \\
+        \texttt{voxel\_scale} & \([0.4909,0.73635,0.4909]\) & voxel scale \\
+        \texttt{voxel\_matrix} & 4x4 & voxel transform \\
+        \texttt{render\_center} & \([0.338,0.388,-0.261]\) & render center \\
+        \texttt{near} & \(1.1\) & near plane \\
+        \texttt{far} & \(1.5\) & far plane \\
+        \texttt{phi} & \(20.0\) & rotation angle \\
+        \texttt{rot} & \texttt{Y} & rotation axis \\
+        \bottomrule
+    \end{tabularx}
+    \par\smallskip
+    \footnotesize\textbf{Table 3:} Global fields.
+    \endgroup
+\end{center}
