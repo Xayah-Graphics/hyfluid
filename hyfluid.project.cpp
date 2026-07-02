@@ -1107,9 +1107,8 @@ namespace hyfluid::project {
         controls.metric("pixel_storage_mib", "Pixel Storage MiB", static_cast<double>(this->state->pixel_bytes) / 1048576.0).section(section_diagnostics_id);
         controls.metric("scene_scale", "Scene Scale", std::format("{:.6f}", this->state->dataset.scene_scale)).section(section_diagnostics_id);
         controls.metric("near_far", "Near/Far", std::format("{:.6f} / {:.6f}", this->state->dataset.near, this->state->dataset.far)).section(section_diagnostics_id);
-        for (const FrameSetRuntime& frame_set : this->state->frame_sets) {
+        for (const FrameSetRuntime& frame_set : this->state->frame_sets)
             controls.metric(std::format("frame_set_{}", frame_set.name), frame_set.name, std::format("{} views x {} times | {}x{}", frame_set.view_count, frame_set.time_count, frame_set.width, frame_set.height)).section(section_timeline_id);
-        }
 
         const inspector::TrainingDomainView domain = inspector::Inspector{*this->state->trainer}.training_domain_view();
         const float minimum_metric_extent          = std::min({domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u]});

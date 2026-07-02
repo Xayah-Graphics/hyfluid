@@ -198,9 +198,8 @@ int main(const int argc, const char* const* const argv) {
         std::println("pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
         std::println("train dataset upload: ok");
 
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
+        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets)
             std::println("frame_set '{}': {} frames, {} views x {} times, {:.3f} MiB pixels", frame_set.name, frame_set.frame_count, frame_set.view_count, frame_set.time_count, static_cast<double>(frame_set.pixel_bytes) / 1048576.0);
-        }
 
         if (optimize_iterations > 0) {
             std::vector<std::string> optimize_frame_sets;
