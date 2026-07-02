@@ -33,7 +33,6 @@ namespace hyfluid::train::config {
     inline constexpr std::size_t cublaslt_workspace_bytes     = static_cast<std::size_t>(64u) * 1024u * 1024u;
     inline constexpr float min_cone_stepsize                  = 1.73205080757f / static_cast<float>(nerf_steps);
     inline constexpr float transmittance_epsilon              = 1.0e-4f;
-    inline constexpr bool snap_to_pixel_centers               = true;
 
     inline constexpr float optimizer_learning_rate = 5.0e-4f;
     inline constexpr float optimizer_beta1         = 0.9f;

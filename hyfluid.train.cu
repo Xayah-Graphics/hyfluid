@@ -238,14 +238,9 @@ namespace hyfluid::cuda {
             const std::uint32_t training_height = height / train::config::training_image_downsample;
             const float u                       = rng.next_float();
             const float v                       = rng.next_float();
-            if (train::config::snap_to_pixel_centers) {
-                out_pixel_x = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(training_width)), training_width - 1u);
-                out_pixel_y = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(training_height)), training_height - 1u);
-            } else {
-                out_pixel_x = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(training_width)), training_width - 1u);
-                out_pixel_y = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(training_height)), training_height - 1u);
-            }
-            out_start_jitter = rng.next_float();
+            out_pixel_x                         = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(training_width)), training_width - 1u);
+            out_pixel_y                         = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(training_height)), training_height - 1u);
+            out_start_jitter                     = rng.next_float();
         }
 
         __global__ void generate_training_samples_kernel(const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ ray_counter, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ ray_indices_out, float* __restrict__ rays_out, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {

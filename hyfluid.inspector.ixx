@@ -7,27 +7,6 @@ namespace hyfluid::inspector {
     export inline constexpr std::uint64_t SamplerPointInstanceBytes   = static_cast<std::uint64_t>(8u * sizeof(float));
     export inline constexpr std::uint64_t SamplerSegmentInstanceBytes = static_cast<std::uint64_t>(12u * sizeof(float));
 
-    export enum class DensitySliceEncoding : std::uint32_t {
-        MortonFloat32 = 1u,
-    };
-
-    export enum class TrainingCoordinateSpace : std::uint32_t {
-        Field = 0u,
-    };
-
-    export enum class OccupancyGridState : std::uint32_t {
-        Full    = 0u,
-        Static  = 1u,
-        Learned = 2u,
-    };
-
-    export struct TrainingDomainView final {
-        std::array<float, 3u> field_min{0.0f, 0.0f, 0.0f};
-        std::array<float, 3u> field_max{1.0f, 1.0f, 1.0f};
-        TrainingCoordinateSpace coordinate_space{TrainingCoordinateSpace::Field};
-        OccupancyGridState occupancy_state{OccupancyGridState::Full};
-    };
-
     export struct TrainingBatchDiagnostics final {
         std::array<float, 3u> sample_coord_min{};
         std::array<float, 3u> sample_coord_max{};
@@ -53,7 +32,6 @@ namespace hyfluid::inspector {
         std::uint32_t time_index{};
         float* output_density{};
         std::uint64_t byte_size{};
-        DensitySliceEncoding encoding{DensitySliceEncoding::MortonFloat32};
     };
 
     export struct DensitySliceSampleStats final {
@@ -64,11 +42,6 @@ namespace hyfluid::inspector {
         float density_max                   = 0.0f;
         float density_mean                  = 0.0f;
         std::uint64_t density_nonzero_count = 0u;
-        DensitySliceEncoding encoding{DensitySliceEncoding::MortonFloat32};
-    };
-
-    export enum class OccupancyGridEncoding : std::uint32_t {
-        MortonBitfield = 0u,
     };
 
     export struct OccupancyGridDeviceView final {
@@ -77,8 +50,6 @@ namespace hyfluid::inspector {
         const std::uint8_t* bitfield{};
         std::uint64_t bitfield_bytes = 0u;
         std::uint32_t occupied_cells = 0u;
-        std::uint64_t revision       = 0u;
-        OccupancyGridEncoding encoding{OccupancyGridEncoding::MortonBitfield};
         bool initialized = false;
     };
 
@@ -116,7 +87,6 @@ namespace hyfluid::inspector {
     export struct Inspector final {
         explicit Inspector(const train::HyFluid& trainer);
 
-        [[nodiscard]] TrainingDomainView training_domain_view() const;
         [[nodiscard]] TrainingBatchDiagnostics training_batch_diagnostics() const;
         [[nodiscard]] TrainingModelDiagnostics training_model_diagnostics() const;
         [[nodiscard]] SamplerBatchDeviceView sampler_batch_device_view() const;

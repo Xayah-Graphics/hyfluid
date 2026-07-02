@@ -11,16 +11,6 @@ namespace hyfluid::inspector {
 
     Inspector::Inspector(const train::HyFluid& trainer) : trainer{std::addressof(trainer)} {}
 
-    TrainingDomainView Inspector::training_domain_view() const {
-        const OccupancyGridState occupancy_state = this->trainer->host.occupancy_grid_occupied_cells == train::config::nerf_grid_cells ? OccupancyGridState::Full : OccupancyGridState::Static;
-        return TrainingDomainView{
-            .field_min        = {0.0f, 0.0f, 0.0f},
-            .field_max        = {1.0f, 1.0f, 1.0f},
-            .coordinate_space = TrainingCoordinateSpace::Field,
-            .occupancy_state  = occupancy_state,
-        };
-    }
-
     TrainingBatchDiagnostics Inspector::training_batch_diagnostics() const {
         if (this->trainer->host.current_step == 0u || this->trainer->host.measured_sample_count == 0u) throw std::runtime_error{"training batch diagnostics require an initialized training batch."};
         if (this->trainer->device.compacted_sample_coords == nullptr) throw std::runtime_error{"training batch compacted sample buffer is null."};
@@ -61,8 +51,6 @@ namespace hyfluid::inspector {
             .bitfield       = this->trainer->device.occupancy,
             .bitfield_bytes = train::config::nerf_grid_cells / 8u,
             .occupied_cells = this->trainer->host.occupancy_grid_occupied_cells,
-            .revision       = 1u,
-            .encoding       = OccupancyGridEncoding::MortonBitfield,
             .initialized    = this->trainer->device.occupancy != nullptr,
         };
     }
@@ -90,7 +78,6 @@ namespace hyfluid::inspector {
         try {
             if (this->trainer->host.current_step == 0u) throw std::runtime_error{"density slice cannot be sampled before the first training step."};
             if (request.dimensions != std::array{DensitySliceDimension, DensitySliceDimension, DensitySliceDimension}) throw std::runtime_error{"density slice dimensions must match HyFluid density slice dimension."};
-            if (request.encoding != DensitySliceEncoding::MortonFloat32) throw std::runtime_error{"density slice sample only supports MortonFloat32 encoding."};
             if (request.time_count == 0u) throw std::runtime_error{"density slice time count must be positive."};
             if (request.time_index >= request.time_count) throw std::runtime_error{"density slice time index is outside time count."};
             if (request.output_density == nullptr) throw std::runtime_error{"density slice output pointer must not be null."};
@@ -114,7 +101,6 @@ namespace hyfluid::inspector {
                 .density_max           = density_max,
                 .density_mean          = density_mean,
                 .density_nonzero_count = density_nonzero_count,
-                .encoding              = DensitySliceEncoding::MortonFloat32,
             };
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};
