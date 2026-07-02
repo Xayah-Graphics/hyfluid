@@ -20,15 +20,8 @@ namespace hyfluid::train {
                 if (!std::isfinite(sim_to_world[i])) throw std::runtime_error{"sim_to_world contains non-finite values."};
             for (std::size_t i = 0uz; i < 3uz; ++i)
                 if (!std::isfinite(voxel_scale[i]) || voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
-            constexpr std::array field_sim_extent = {
-                config::scalar_real_active_sim_max[0u] - config::scalar_real_active_sim_min[0u],
-                config::scalar_real_active_sim_max[1u] - config::scalar_real_active_sim_min[1u],
-                config::scalar_real_active_sim_max[2u] - config::scalar_real_active_sim_min[2u],
-            };
-            for (const float extent : field_sim_extent)
-                if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"ScalarReal active simulation box is invalid."};
             for (std::size_t row = 0uz; row < 3uz; ++row)
-                for (std::size_t column = 0uz; column < 3uz; ++column) this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * voxel_scale[column] * field_sim_extent[column];
+                for (std::size_t column = 0uz; column < 3uz; ++column) this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * voxel_scale[column] * config::scalar_real_active_sim_extent[column];
             for (std::size_t column = 0uz; column < 3uz; ++column) {
                 const float x      = this->host.field_to_world_linear[column];
                 const float y      = this->host.field_to_world_linear[3uz + column];

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace hyfluid::train::config {
     inline constexpr std::uint32_t hash4_level_count        = 16u;
@@ -35,8 +36,13 @@ namespace hyfluid::train::config {
     inline constexpr float transmittance_epsilon              = 1.0e-4f;
     inline constexpr bool snap_to_pixel_centers               = true;
 
-    inline constexpr std::array scalar_real_active_sim_min = {0.15f, 0.0f, 0.15f};
-    inline constexpr std::array scalar_real_active_sim_max = {0.85f, 1.0f, 0.85f};
+    inline constexpr std::array scalar_real_active_sim_min    = {0.15f, 0.0f, 0.15f};
+    inline constexpr std::array scalar_real_active_sim_max    = {0.85f, 1.0f, 0.85f};
+    inline constexpr std::array scalar_real_active_sim_extent = {
+        scalar_real_active_sim_max[0u] - scalar_real_active_sim_min[0u],
+        scalar_real_active_sim_max[1u] - scalar_real_active_sim_min[1u],
+        scalar_real_active_sim_max[2u] - scalar_real_active_sim_min[2u],
+    };
 
     inline constexpr float optimizer_learning_rate = 5.0e-4f;
     inline constexpr float optimizer_beta1         = 0.9f;
@@ -124,6 +130,9 @@ namespace hyfluid::train::config {
     static_assert(network_output_width == 1u);
     static_assert(network_batch_size % network_batch_granularity == 0u);
     static_assert(training_image_downsample != 0u);
+    static_assert(scalar_real_active_sim_extent[0u] > 0.0f && scalar_real_active_sim_extent[0u] < std::numeric_limits<float>::infinity());
+    static_assert(scalar_real_active_sim_extent[1u] > 0.0f && scalar_real_active_sim_extent[1u] < std::numeric_limits<float>::infinity());
+    static_assert(scalar_real_active_sim_extent[2u] > 0.0f && scalar_real_active_sim_extent[2u] < std::numeric_limits<float>::infinity());
     static_assert(sample_coord_floats == 5u);
     static_assert(ray_floats == 6u);
     static_assert(evaluation_tile_pixels != 0u);
