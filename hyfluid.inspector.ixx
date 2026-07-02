@@ -24,7 +24,6 @@ namespace hyfluid::inspector {
     export struct TrainingDomainView final {
         std::array<float, 3u> field_min{0.0f, 0.0f, 0.0f};
         std::array<float, 3u> field_max{1.0f, 1.0f, 1.0f};
-        std::array<float, 3u> field_metric_extent{};
         TrainingCoordinateSpace coordinate_space{TrainingCoordinateSpace::Field};
         OccupancyGridState occupancy_state{OccupancyGridState::Full};
     };

@@ -1205,13 +1205,9 @@ namespace hyfluid::project {
             controls.metric(std::format("frame_set_{}", frame_set.name), frame_set.name, std::format("{} views x {} times | {}x{}", frame_set.view_count, frame_set.time_count, frame_set.width, frame_set.height)).section(section_timeline_id);
 
         const inspector::TrainingDomainView domain = inspector::Inspector{*this->state->trainer}.training_domain_view();
-        const float minimum_metric_extent          = std::min({domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u]});
-        if (!std::isfinite(minimum_metric_extent) || minimum_metric_extent <= 0.0f) throw std::runtime_error{"HyFluid field metric extent is invalid."};
         controls.metric("coordinate_space", "Coordinate Space", "Field [0,1]^3").section(section_domain_id).display_primary().color({0.20f, 0.58f, 1.0f, 1.0f});
         controls.metric("field_domain", "Field Domain", this->state->field_domain_segments.has_value() ? "visible" : "hidden").section(section_domain_id);
         controls.metric("active_domain", "Active Domain", this->state->active_domain_segments.has_value() ? "visible" : "hidden").section(section_domain_id);
-        controls.metric("metric_extent", "Metric Extent", std::format("{:.5f}, {:.5f}, {:.5f}", domain.field_metric_extent[0u], domain.field_metric_extent[1u], domain.field_metric_extent[2u])).section(section_domain_id);
-        controls.metric("metric_aspect", "Aspect", std::format("{:.3f} : {:.3f} : {:.3f}", domain.field_metric_extent[0u] / minimum_metric_extent, domain.field_metric_extent[1u] / minimum_metric_extent, domain.field_metric_extent[2u] / minimum_metric_extent)).section(section_domain_id);
         controls.metric("occupancy_state", "Occupancy State", std::string{occupancy_state_label(domain.occupancy_state)}).section(section_field_id);
 
         const std::string volume_state = density_volume_visible(*this->state) ? "visible" : this->state->latest_stats.has_value() ? "hidden" : "pending";

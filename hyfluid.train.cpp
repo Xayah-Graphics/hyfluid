@@ -26,8 +26,8 @@ namespace hyfluid::train {
             return result;
         }
 
-        [[nodiscard]] std::array<float, 16u> invert_matrix_4x4(const std::span<const float> matrix, const std::string_view context) {
-            if (matrix.size() != 16uz) throw std::runtime_error{std::format("{} must contain 16 values.", context)};
+        [[nodiscard]] std::array<float, 16u> invert_matrix_4x4(const std::span<const float> matrix) {
+            if (matrix.size() != 16uz) throw std::runtime_error{"matrix must contain 16 values."};
             std::array<float, 32u> inverse_work = {};
             for (std::size_t row = 0uz; row < 4uz; ++row) {
                 for (std::size_t column = 0uz; column < 4uz; ++column) inverse_work[row * 8uz + column] = matrix[row * 4uz + column];
@@ -43,7 +43,7 @@ namespace hyfluid::train {
                         pivot_row = row;
                     }
                 }
-                if (pivot_abs <= 1.0e-12f) throw std::runtime_error{std::format("{} is singular.", context)};
+                if (pivot_abs <= 1.0e-12f) throw std::runtime_error{"matrix is singular."};
                 if (pivot_row != pivot_column)
                     for (std::size_t column = 0uz; column < 8uz; ++column) std::swap(inverse_work[pivot_row * 8uz + column], inverse_work[pivot_column * 8uz + column]);
                 const float pivot = inverse_work[pivot_column * 8uz + pivot_column];
@@ -58,7 +58,7 @@ namespace hyfluid::train {
             for (std::size_t row = 0uz; row < 4uz; ++row)
                 for (std::size_t column = 0uz; column < 4uz; ++column) inverse[row * 4uz + column] = inverse_work[row * 8uz + 4uz + column];
             for (const float value : inverse)
-                if (!std::isfinite(value)) throw std::runtime_error{std::format("{} inverse contains non-finite values.", context)};
+                if (!std::isfinite(value)) throw std::runtime_error{"matrix inverse contains non-finite values."};
             return inverse;
         }
 
@@ -103,15 +103,16 @@ namespace hyfluid::train {
                 if (!std::isfinite(field_voxel_scale[i]) || field_voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
             }
             const std::array sim_to_world = swap_xz_axis(voxel_matrix);
-            const std::array world_to_sim = invert_matrix_4x4(std::span<const float>{sim_to_world.data(), sim_to_world.size()}, "voxel_matrix");
+            const std::array world_to_sim = invert_matrix_4x4(std::span{sim_to_world.data(), sim_to_world.size()});
+            std::array<float, 9u> field_to_world_linear = {};
             for (std::size_t row = 0uz; row < 3uz; ++row)
-                for (std::size_t column = 0uz; column < 3uz; ++column) this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * field_voxel_scale[column];
+                for (std::size_t column = 0uz; column < 3uz; ++column) field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * field_voxel_scale[column];
             for (std::size_t column = 0uz; column < 3uz; ++column) {
-                const float x      = this->host.field_to_world_linear[column];
-                const float y      = this->host.field_to_world_linear[3uz + column];
-                const float z      = this->host.field_to_world_linear[6uz + column];
+                const float x      = field_to_world_linear[column];
+                const float y      = field_to_world_linear[3uz + column];
+                const float z      = field_to_world_linear[6uz + column];
                 const float extent = std::sqrt(x * x + y * y + z * z);
-                if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"Field domain metric extent is invalid."};
+                if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"field_to_world_linear contains a degenerate axis."};
             }
 
             // ====================================================================================================
@@ -209,7 +210,7 @@ namespace hyfluid::train {
             if (evaluation_pixel_capacity == 0ull || evaluation_pixel_capacity > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation render pixel capacity is invalid."};
             this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
 
-            cuda::upload_field_domain(this->host.field_to_world_linear.data(), this->device.field_to_world_linear);
+            cuda::upload_field_domain(field_to_world_linear.data(), this->device.field_to_world_linear);
             cuda::allocate_sampler_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
             cuda::allocate_training_loss_buffers(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients);
             cuda::allocate_network_buffers(this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);

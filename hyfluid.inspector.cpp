@@ -13,21 +13,11 @@ namespace hyfluid::inspector {
 
     TrainingDomainView Inspector::training_domain_view() const {
         const OccupancyGridState occupancy_state = this->trainer->host.occupancy_grid_occupied_cells == train::config::nerf_grid_cells ? OccupancyGridState::Full : OccupancyGridState::Static;
-        std::array<float, 3u> field_metric_extent{};
-        for (std::size_t column = 0uz; column < 3uz; ++column) {
-            const float x      = this->trainer->host.field_to_world_linear[column];
-            const float y      = this->trainer->host.field_to_world_linear[3uz + column];
-            const float z      = this->trainer->host.field_to_world_linear[6uz + column];
-            const float extent = std::sqrt(x * x + y * y + z * z);
-            if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"Field domain metric extent is invalid."};
-            field_metric_extent[column] = extent;
-        }
         return TrainingDomainView{
-            .field_min           = {0.0f, 0.0f, 0.0f},
-            .field_max           = {1.0f, 1.0f, 1.0f},
-            .field_metric_extent = field_metric_extent,
-            .coordinate_space    = TrainingCoordinateSpace::Field,
-            .occupancy_state     = occupancy_state,
+            .field_min        = {0.0f, 0.0f, 0.0f},
+            .field_max        = {1.0f, 1.0f, 1.0f},
+            .coordinate_space = TrainingCoordinateSpace::Field,
+            .occupancy_state  = occupancy_state,
         };
     }
 

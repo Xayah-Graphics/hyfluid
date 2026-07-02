@@ -183,7 +183,6 @@ int main(const int argc, const char* const* const argv) {
             }
             std::println("weights loaded: {}", load_weights_path->string());
         }
-        const hyfluid::inspector::TrainingDomainView training_domain = inspector.training_domain_view();
         std::uint64_t total_pixel_bytes = 0u;
         std::uint64_t total_frame_count  = 0u;
         for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
@@ -196,7 +195,6 @@ int main(const int argc, const char* const* const argv) {
         std::println("path: {}", dataset_path.string());
         std::println("scene_scale: {:.6f}", dataset.scene_scale);
         std::println("near/far: {:.6f} / {:.6f}", dataset.near, dataset.far);
-        std::println("field_metric_extent: [{:.6f}, {:.6f}, {:.6f}]", training_domain.field_metric_extent[0u], training_domain.field_metric_extent[1u], training_domain.field_metric_extent[2u]);
         std::println("frame sets: {}", hyfluid.host.frame_sets.size());
         std::println("videos: {}", dataset.videos.size());
         std::println("frames: {}", total_frame_count);
@@ -344,7 +342,7 @@ int main(const int argc, const char* const* const argv) {
                              stats.elapsed_ms);
 
                 if (training_log) {
-                    training_log << std::format("{{\"step\":{},\"loss\":{:.9g},\"psnr\":{:.9g},\"recent_psnr\":{:.9g},\"ray_count\":{},\"rays_per_batch\":{},\"sample_count\":{},\"sample_count_before_compaction\":{},\"sample_efficiency_ratio\":{:.9g},\"coord_min\":[{:.9g},{:.9g},{:.9g}],\"coord_max\":[{:.9g},{:.9g},{:.9g}],\"time_min\":{:.9g},\"time_max\":{:.9g},\"dt_metric_min\":{:.9g},\"dt_metric_mean\":{:.9g},\"dt_metric_max\":{:.9g},\"metric_per_field_unit_min\":{:.9g},\"metric_per_field_unit_mean\":{:.9g},\"metric_per_field_unit_max\":{:.9g},\"field_metric_extent\":[{:.9g},{:.9g},{:.9g}],\"global_rgb_param\":{:.9g},\"global_rgb_color\":{:.9g},\"global_rgb_gradient\":{:.9g},\"occupancy_grid_occupied_cells\":{},\"occupancy_grid_ratio\":{:.9g},\"elapsed_ms\":{:.9g}}}\n",
+                    training_log << std::format("{{\"step\":{},\"loss\":{:.9g},\"psnr\":{:.9g},\"recent_psnr\":{:.9g},\"ray_count\":{},\"rays_per_batch\":{},\"sample_count\":{},\"sample_count_before_compaction\":{},\"sample_efficiency_ratio\":{:.9g},\"coord_min\":[{:.9g},{:.9g},{:.9g}],\"coord_max\":[{:.9g},{:.9g},{:.9g}],\"time_min\":{:.9g},\"time_max\":{:.9g},\"dt_metric_min\":{:.9g},\"dt_metric_mean\":{:.9g},\"dt_metric_max\":{:.9g},\"metric_per_field_unit_min\":{:.9g},\"metric_per_field_unit_mean\":{:.9g},\"metric_per_field_unit_max\":{:.9g},\"global_rgb_param\":{:.9g},\"global_rgb_color\":{:.9g},\"global_rgb_gradient\":{:.9g},\"occupancy_grid_occupied_cells\":{},\"occupancy_grid_ratio\":{:.9g},\"elapsed_ms\":{:.9g}}}\n",
                                                 stats.step,
                                                 stats.loss,
                                                 stats.psnr,
@@ -368,9 +366,6 @@ int main(const int argc, const char* const* const argv) {
                                                 batch_diagnostics.metric_per_field_unit_min,
                                                 batch_diagnostics.metric_per_field_unit_mean,
                                                 batch_diagnostics.metric_per_field_unit_max,
-                                                training_domain.field_metric_extent[0u],
-                                                training_domain.field_metric_extent[1u],
-                                                training_domain.field_metric_extent[2u],
                                                 model_diagnostics.global_rgb_param,
                                                 model_diagnostics.global_rgb_color,
                                                 model_diagnostics.global_rgb_gradient,

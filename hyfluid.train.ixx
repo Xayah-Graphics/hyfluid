@@ -154,8 +154,7 @@ namespace hyfluid::train {
 
         struct HostData {
             // Stable after construction: dynamic dataset metadata.
-            std::vector<HostFrameSet> frame_sets        = {};
-            std::array<float, 9u> field_to_world_linear = {};
+            std::vector<HostFrameSet> frame_sets = {};
 
             // Mutated by optimize(): training step, adaptive batch shape, and latest counters.
             std::uint32_t current_step                            = 0u;
