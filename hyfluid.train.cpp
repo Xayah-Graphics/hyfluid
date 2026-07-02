@@ -11,17 +11,101 @@ module hyfluid.train;
 import std;
 
 namespace hyfluid::train {
-    void HyFluid::initialize(const std::span<const FrameSetView> frame_sets, const std::span<const float> sim_to_world, const std::span<const float> voxel_scale) {
+    namespace {
+        [[nodiscard]] std::array<float, 16u> swap_xz_axis(const std::span<const float> matrix) {
+            if (matrix.size() != 16uz) throw std::runtime_error{"matrix must contain 16 values."};
+            std::array<float, 16u> result = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row) {
+                result[row * 4uz + 0uz] = matrix[row * 4uz + 2uz];
+                result[row * 4uz + 1uz] = matrix[row * 4uz + 1uz];
+                result[row * 4uz + 2uz] = matrix[row * 4uz + 0uz];
+                result[row * 4uz + 3uz] = matrix[row * 4uz + 3uz];
+            }
+            for (const float value : result)
+                if (!std::isfinite(value)) throw std::runtime_error{"matrix contains non-finite values."};
+            return result;
+        }
+
+        [[nodiscard]] std::array<float, 16u> invert_matrix_4x4(const std::span<const float> matrix, const std::string_view context) {
+            if (matrix.size() != 16uz) throw std::runtime_error{std::format("{} must contain 16 values.", context)};
+            std::array<float, 32u> inverse_work = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row) {
+                for (std::size_t column = 0uz; column < 4uz; ++column) inverse_work[row * 8uz + column] = matrix[row * 4uz + column];
+                inverse_work[row * 8uz + 4uz + row] = 1.0f;
+            }
+            for (std::size_t pivot_column = 0uz; pivot_column < 4uz; ++pivot_column) {
+                std::size_t pivot_row = pivot_column;
+                float pivot_abs       = std::fabs(inverse_work[pivot_row * 8uz + pivot_column]);
+                for (std::size_t row = pivot_column + 1uz; row < 4uz; ++row) {
+                    const float candidate_abs = std::fabs(inverse_work[row * 8uz + pivot_column]);
+                    if (candidate_abs > pivot_abs) {
+                        pivot_abs = candidate_abs;
+                        pivot_row = row;
+                    }
+                }
+                if (pivot_abs <= 1.0e-12f) throw std::runtime_error{std::format("{} is singular.", context)};
+                if (pivot_row != pivot_column)
+                    for (std::size_t column = 0uz; column < 8uz; ++column) std::swap(inverse_work[pivot_row * 8uz + column], inverse_work[pivot_column * 8uz + column]);
+                const float pivot = inverse_work[pivot_column * 8uz + pivot_column];
+                for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[pivot_column * 8uz + column] /= pivot;
+                for (std::size_t row = 0uz; row < 4uz; ++row) {
+                    if (row == pivot_column) continue;
+                    const float factor = inverse_work[row * 8uz + pivot_column];
+                    for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[row * 8uz + column] -= factor * inverse_work[pivot_column * 8uz + column];
+                }
+            }
+            std::array<float, 16u> inverse = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row)
+                for (std::size_t column = 0uz; column < 4uz; ++column) inverse[row * 4uz + column] = inverse_work[row * 8uz + 4uz + column];
+            for (const float value : inverse)
+                if (!std::isfinite(value)) throw std::runtime_error{std::format("{} inverse contains non-finite values.", context)};
+            return inverse;
+        }
+
+        [[nodiscard]] std::array<float, 12u> unit_aabb_camera_from_transform_matrix(const std::span<const float> transform_matrix, const std::array<float, 16u>& world_to_sim, const std::array<float, 3u>& voxel_scale) {
+            if (transform_matrix.size() != 16uz) throw std::runtime_error{"transform_matrix must contain 16 values."};
+            for (const float value : transform_matrix)
+                if (!std::isfinite(value)) throw std::runtime_error{"transform_matrix contains non-finite values."};
+
+            const std::array raw_origin                          = {transform_matrix[3uz], transform_matrix[7uz], transform_matrix[11uz]};
+            const std::array<std::array<float, 3u>, 3u> raw_axes = {{
+                {transform_matrix[0uz], transform_matrix[4uz], transform_matrix[8uz]},
+                {-transform_matrix[1uz], -transform_matrix[5uz], -transform_matrix[9uz]},
+                {-transform_matrix[2uz], -transform_matrix[6uz], -transform_matrix[10uz]},
+            }};
+
+            std::array<float, 12u> camera = {};
+            camera[0uz]                   = (world_to_sim[0uz] * raw_axes[0uz][0uz] + world_to_sim[1uz] * raw_axes[0uz][1uz] + world_to_sim[2uz] * raw_axes[0uz][2uz]) / voxel_scale[0uz];
+            camera[1uz]                   = (world_to_sim[4uz] * raw_axes[0uz][0uz] + world_to_sim[5uz] * raw_axes[0uz][1uz] + world_to_sim[6uz] * raw_axes[0uz][2uz]) / voxel_scale[1uz];
+            camera[2uz]                   = (world_to_sim[8uz] * raw_axes[0uz][0uz] + world_to_sim[9uz] * raw_axes[0uz][1uz] + world_to_sim[10uz] * raw_axes[0uz][2uz]) / voxel_scale[2uz];
+            camera[3uz]                   = (world_to_sim[0uz] * raw_axes[1uz][0uz] + world_to_sim[1uz] * raw_axes[1uz][1uz] + world_to_sim[2uz] * raw_axes[1uz][2uz]) / voxel_scale[0uz];
+            camera[4uz]                   = (world_to_sim[4uz] * raw_axes[1uz][0uz] + world_to_sim[5uz] * raw_axes[1uz][1uz] + world_to_sim[6uz] * raw_axes[1uz][2uz]) / voxel_scale[1uz];
+            camera[5uz]                   = (world_to_sim[8uz] * raw_axes[1uz][0uz] + world_to_sim[9uz] * raw_axes[1uz][1uz] + world_to_sim[10uz] * raw_axes[1uz][2uz]) / voxel_scale[2uz];
+            camera[6uz]                   = (world_to_sim[0uz] * raw_axes[2uz][0uz] + world_to_sim[1uz] * raw_axes[2uz][1uz] + world_to_sim[2uz] * raw_axes[2uz][2uz]) / voxel_scale[0uz];
+            camera[7uz]                   = (world_to_sim[4uz] * raw_axes[2uz][0uz] + world_to_sim[5uz] * raw_axes[2uz][1uz] + world_to_sim[6uz] * raw_axes[2uz][2uz]) / voxel_scale[1uz];
+            camera[8uz]                   = (world_to_sim[8uz] * raw_axes[2uz][0uz] + world_to_sim[9uz] * raw_axes[2uz][1uz] + world_to_sim[10uz] * raw_axes[2uz][2uz]) / voxel_scale[2uz];
+            camera[9uz]                   = (world_to_sim[0uz] * raw_origin[0uz] + world_to_sim[1uz] * raw_origin[1uz] + world_to_sim[2uz] * raw_origin[2uz] + world_to_sim[3uz]) / voxel_scale[0uz];
+            camera[10uz]                  = (world_to_sim[4uz] * raw_origin[0uz] + world_to_sim[5uz] * raw_origin[1uz] + world_to_sim[6uz] * raw_origin[2uz] + world_to_sim[7uz]) / voxel_scale[1uz];
+            camera[11uz]                  = (world_to_sim[8uz] * raw_origin[0uz] + world_to_sim[9uz] * raw_origin[1uz] + world_to_sim[10uz] * raw_origin[2uz] + world_to_sim[11uz]) / voxel_scale[2uz];
+            for (const float value : camera)
+                if (!std::isfinite(value)) throw std::runtime_error{"transform_matrix maps to non-finite unit AABB camera values."};
+            return camera;
+        }
+    } // namespace
+
+    void HyFluid::initialize(const std::span<const FrameSetView> frame_sets, const std::span<const float> voxel_matrix, const std::span<const float> voxel_scale) {
         try {
             if (frame_sets.empty()) throw std::runtime_error{"dynamic dataset must contain at least one frame set."};
-            if (sim_to_world.size() != 16uz) throw std::runtime_error{"sim_to_world must contain 16 values."};
             if (voxel_scale.size() != 3uz) throw std::runtime_error{"voxel_scale must contain 3 values."};
-            for (std::size_t i = 0uz; i < 16uz; ++i)
-                if (!std::isfinite(sim_to_world[i])) throw std::runtime_error{"sim_to_world contains non-finite values."};
-            for (std::size_t i = 0uz; i < 3uz; ++i)
-                if (!std::isfinite(voxel_scale[i]) || voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
+            std::array<float, 3u> field_voxel_scale = {};
+            for (std::size_t i = 0uz; i < 3uz; ++i) {
+                field_voxel_scale[i] = voxel_scale[i];
+                if (!std::isfinite(field_voxel_scale[i]) || field_voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
+            }
+            const std::array sim_to_world = swap_xz_axis(voxel_matrix);
+            const std::array world_to_sim = invert_matrix_4x4(std::span<const float>{sim_to_world.data(), sim_to_world.size()}, "voxel_matrix");
             for (std::size_t row = 0uz; row < 3uz; ++row)
-                for (std::size_t column = 0uz; column < 3uz; ++column) this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * voxel_scale[column] * config::scalar_real_active_sim_extent[column];
+                for (std::size_t column = 0uz; column < 3uz; ++column) this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * field_voxel_scale[column];
             for (std::size_t column = 0uz; column < 3uz; ++column) {
                 const float x      = this->host.field_to_world_linear[column];
                 const float y      = this->host.field_to_world_linear[3uz + column];
@@ -46,12 +130,8 @@ namespace hyfluid::train {
                     for (const HostFrameSet& existing_frame_set : this->host.frame_sets)
                         if (existing_frame_set.name == frame_set.name) throw std::runtime_error{std::format("frame set '{}' was loaded more than once.", frame_set.name)};
                     if (this->host.frame_sets.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) throw std::runtime_error{"dynamic dataset contains too many frame sets."};
-                    if (this->host.frames.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) throw std::runtime_error{"dynamic dataset contains too many frames."};
-                    if (frame_set.frames.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()) - this->host.frames.size()) throw std::runtime_error{"dynamic dataset contains too many frames."};
 
-                    const auto host_frame_set_index = static_cast<std::uint32_t>(this->host.frame_sets.size());
-                    const auto host_frame_offset    = static_cast<std::uint32_t>(this->host.frames.size());
-                    const FrameView& first_frame    = frame_set.frames.front();
+                    const FrameView& first_frame = frame_set.frames.front();
                     if (first_frame.width == 0u || first_frame.height == 0u) throw std::runtime_error{std::format("frame set '{}' contains a frame with invalid dimensions.", frame_set.name)};
                     if (first_frame.height > std::numeric_limits<std::uint64_t>::max() / static_cast<std::uint64_t>(first_frame.width) / 4ull) throw std::runtime_error{std::format("frame set '{}' contains an image that is too large.", frame_set.name)};
                     const std::uint64_t frame_pixel_bytes = static_cast<std::uint64_t>(first_frame.width) * static_cast<std::uint64_t>(first_frame.height) * 4ull;
@@ -61,9 +141,6 @@ namespace hyfluid::train {
                     std::vector<std::uint8_t> pixels;
                     std::vector<float> camera;
                     std::vector<float> intrinsics;
-                    std::vector<float> times;
-                    std::vector<std::uint32_t> view_indices;
-                    std::vector<std::uint32_t> time_indices;
                     std::vector frame_indices(frame_set.frames.size(), std::numeric_limits<std::uint32_t>::max());
                     std::vector<std::array<float, 12u>> view_camera(frame_set.view_count);
                     std::vector<std::array<float, 4u>> view_intrinsics(frame_set.view_count);
@@ -71,30 +148,24 @@ namespace hyfluid::train {
                     pixels.reserve(frame_set.frames.size() * static_cast<std::size_t>(frame_pixel_bytes));
                     camera.reserve(frame_set.frames.size() * 12uz);
                     intrinsics.reserve(frame_set.frames.size() * 4uz);
-                    times.reserve(frame_set.frames.size());
-                    view_indices.reserve(frame_set.frames.size());
-                    time_indices.reserve(frame_set.frames.size());
 
                     std::uint32_t frame_index = 0u;
                     for (const FrameView& frame : frame_set.frames) {
                         if (frame.width != first_frame.width || frame.height != first_frame.height) throw std::runtime_error{std::format("frame set '{}' contains mixed image dimensions.", frame_set.name)};
                         if (frame.rgba.size() != static_cast<std::size_t>(frame_pixel_bytes)) throw std::runtime_error{std::format("frame set '{}' contains a frame with {} RGBA bytes; expected {}.", frame_set.name, frame.rgba.size(), frame_pixel_bytes)};
-                        if (frame.camera.size() != 12uz) throw std::runtime_error{std::format("frame set '{}' contains a frame with {} camera values; expected 12.", frame_set.name, frame.camera.size())};
                         if (!std::isfinite(frame.focal_x) || !std::isfinite(frame.focal_y) || frame.focal_x <= 0.0f || frame.focal_y <= 0.0f) throw std::runtime_error{std::format("frame set '{}' contains invalid focal length.", frame_set.name)};
                         if (!std::isfinite(frame.principal_x) || !std::isfinite(frame.principal_y) || frame.principal_x < 0.0f || frame.principal_y < 0.0f || frame.principal_x >= static_cast<float>(frame.width) || frame.principal_y >= static_cast<float>(frame.height)) throw std::runtime_error{std::format("frame set '{}' contains invalid principal point.", frame_set.name)};
-                        if (!std::isfinite(frame.time)) throw std::runtime_error{std::format("frame set '{}' contains non-finite time.", frame_set.name)};
                         if (frame.view_index >= frame_set.view_count) throw std::runtime_error{std::format("frame set '{}' contains view_index {} outside view_count {}.", frame_set.name, frame.view_index, frame_set.view_count)};
                         if (frame.time_index >= frame_set.time_count) throw std::runtime_error{std::format("frame set '{}' contains time_index {} outside time_count {}.", frame_set.name, frame.time_index, frame_set.time_count)};
-                        for (const float camera_value : frame.camera)
-                            if (!std::isfinite(camera_value)) throw std::runtime_error{std::format("frame set '{}' contains non-finite camera values.", frame_set.name)};
+                        const std::array frame_camera     = unit_aabb_camera_from_transform_matrix(frame.transform_matrix, world_to_sim, field_voxel_scale);
                         const std::array frame_intrinsics = {frame.focal_x, frame.focal_y, frame.principal_x, frame.principal_y};
                         if (view_reference_seen[frame.view_index] == 0u) {
-                            for (std::size_t i = 0uz; i < 12uz; ++i) view_camera[frame.view_index][i] = frame.camera[i];
+                            for (std::size_t i = 0uz; i < 12uz; ++i) view_camera[frame.view_index][i] = frame_camera[i];
                             view_intrinsics[frame.view_index]     = frame_intrinsics;
                             view_reference_seen[frame.view_index] = 1u;
                         } else {
                             for (std::size_t i = 0uz; i < 12uz; ++i)
-                                if (view_camera[frame.view_index][i] != frame.camera[i]) throw std::runtime_error{std::format("frame set '{}' contains changing camera values for view {}.", frame_set.name, frame.view_index)};
+                                if (view_camera[frame.view_index][i] != frame_camera[i]) throw std::runtime_error{std::format("frame set '{}' contains changing camera values for view {}.", frame_set.name, frame.view_index)};
                             for (std::size_t i = 0uz; i < 4uz; ++i)
                                 if (view_intrinsics[frame.view_index][i] != frame_intrinsics[i]) throw std::runtime_error{std::format("frame set '{}' contains changing intrinsics for view {}.", frame_set.name, frame.view_index)};
                         }
@@ -103,29 +174,12 @@ namespace hyfluid::train {
                         if (frame_indices[frame_grid_index] != std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("frame set '{}' contains duplicate frame at view {} time {}.", frame_set.name, frame.view_index, frame.time_index)};
                         frame_indices[frame_grid_index] = frame_index;
 
-                        const std::uint64_t pixel_offset = pixels.size();
                         pixels.append_range(frame.rgba);
-                        camera.append_range(frame.camera);
+                        camera.append_range(frame_camera);
                         intrinsics.push_back(frame.focal_x);
                         intrinsics.push_back(frame.focal_y);
                         intrinsics.push_back(frame.principal_x);
                         intrinsics.push_back(frame.principal_y);
-                        times.push_back(frame.time);
-                        view_indices.push_back(frame.view_index);
-                        time_indices.push_back(frame.time_index);
-                        this->host.frames.push_back(HostFrame{
-                            .frame_set_index = host_frame_set_index,
-                            .width           = frame.width,
-                            .height          = frame.height,
-                            .focal_x         = frame.focal_x,
-                            .focal_y         = frame.focal_y,
-                            .principal_x     = frame.principal_x,
-                            .principal_y     = frame.principal_y,
-                            .time            = frame.time,
-                            .view_index      = frame.view_index,
-                            .time_index      = frame.time_index,
-                            .pixel_offset    = pixel_offset,
-                        });
                         ++frame_index;
                     }
                     for (const std::uint32_t stored_frame_index : frame_indices)
@@ -133,19 +187,14 @@ namespace hyfluid::train {
 
                     this->device.frame_sets.push_back({});
                     DeviceFrameSet& device_frame_set = this->device.frame_sets.back();
-                    cuda::upload_dataset(pixels.data(), pixels.size(), camera.data(), camera.size(), intrinsics.data(), intrinsics.size(), times.data(), times.size(), view_indices.data(), view_indices.size(), time_indices.data(), time_indices.size(), frame_indices.data(), frame_indices.size(), device_frame_set.pixels, device_frame_set.camera, device_frame_set.intrinsics, device_frame_set.times, device_frame_set.view_indices, device_frame_set.time_indices, device_frame_set.frame_indices);
+                    cuda::upload_dataset(pixels.data(), pixels.size(), camera.data(), camera.size(), intrinsics.data(), intrinsics.size(), frame_indices.data(), frame_indices.size(), device_frame_set.pixels, device_frame_set.camera, device_frame_set.intrinsics, device_frame_set.frame_indices);
 
                     this->host.frame_sets.push_back(HostFrameSet{
-                        .name              = std::string{frame_set.name},
-                        .frame_offset      = host_frame_offset,
-                        .frame_count       = expected_frame_count,
-                        .view_count        = frame_set.view_count,
-                        .time_count        = frame_set.time_count,
-                        .width             = first_frame.width,
-                        .height            = first_frame.height,
-                        .pixel_bytes       = pixels.size(),
-                        .camera_values     = camera.size(),
-                        .intrinsics_values = intrinsics.size(),
+                        .name       = std::string{frame_set.name},
+                        .view_count = frame_set.view_count,
+                        .time_count = frame_set.time_count,
+                        .width      = first_frame.width,
+                        .height     = first_frame.height,
                     });
                 }
             }
@@ -178,7 +227,7 @@ namespace hyfluid::train {
         } catch (...) {
             cuda::destroy_network_handle(this->device.cublaslt_handle);
             cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
-            for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
+            for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.frame_indices);
             throw;
         }
     }
@@ -186,7 +235,7 @@ namespace hyfluid::train {
     HyFluid::~HyFluid() noexcept {
         cuda::destroy_network_handle(this->device.cublaslt_handle);
         cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
-        for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.times, frame_set.view_indices, frame_set.time_indices, frame_set.frame_indices);
+        for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.frame_indices);
     }
 
     std::expected<OptimizationStats, std::string> HyFluid::optimize(const OptimizationRequest& request) {
@@ -271,7 +320,7 @@ namespace hyfluid::train {
                 }
             }
             if (host_frame_set == nullptr || device_frame_set == nullptr) throw std::runtime_error{std::format("evaluation frame set '{}' is not loaded.", request.frame_set)};
-            if (host_frame_set->view_count == 0u || host_frame_set->time_count == 0u || host_frame_set->frame_count != host_frame_set->view_count * host_frame_set->time_count) throw std::runtime_error{std::format("evaluation frame set '{}' is not a dense view-time grid.", host_frame_set->name)};
+            if (host_frame_set->view_count == 0u || host_frame_set->time_count == 0u) throw std::runtime_error{std::format("evaluation frame set '{}' is not a dense view-time grid.", host_frame_set->name)};
             if (host_frame_set->width % config::training_image_downsample != 0u || host_frame_set->height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("evaluation frame set '{}' dimensions are not divisible by training image downsample.", host_frame_set->name)};
 
             const std::uint32_t render_width  = host_frame_set->width / config::training_image_downsample;
@@ -383,7 +432,7 @@ namespace hyfluid::train {
             nlohmann::json metadata              = nlohmann::json::object();
             metadata["format"]                   = "hyfluid.density.weights.v1";
             metadata["stage"]                    = "density";
-            metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}|domain:min{:.9g},{:.9g},{:.9g}:max{:.9g},{:.9g},{:.9g}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count, config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u], config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+            metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count);
             metadata["hash4_level_count"]        = std::format("{}", config::hash4_level_count);
             metadata["hash4_features_per_level"] = std::format("{}", config::hash4_features_per_level);
             metadata["hash4_max_entries"]        = std::format("{}", config::hash4_max_entries);
@@ -395,8 +444,6 @@ namespace hyfluid::train {
             metadata["global_rgb_offset"]        = std::format("{}", config::network_parameter_layout.global_rgb_offset);
             metadata["total_param_count"]        = std::format("{}", config::network_parameter_layout.total_param_count);
             metadata["sample_coord_floats"]      = std::format("{}", config::sample_coord_floats);
-            metadata["active_sim_min"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u]);
-            metadata["active_sim_max"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
 
             nlohmann::json header  = nlohmann::json::object();
             header["__metadata__"] = metadata;
@@ -465,7 +512,7 @@ namespace hyfluid::train {
             nlohmann::json expected_metadata              = nlohmann::json::object();
             expected_metadata["format"]                   = "hyfluid.density.weights.v1";
             expected_metadata["stage"]                    = "density";
-            expected_metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}|domain:min{:.9g},{:.9g},{:.9g}:max{:.9g},{:.9g},{:.9g}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count, config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u], config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
+            expected_metadata["architecture_fingerprint"] = std::format("hash4:l{}:f{}:max{}:res{}:offsets{}|mlp:w{}:in{}:out{}:global{}:total{}", config::hash4_level_count, config::hash4_features_per_level, config::hash4_max_entries, hash4_resolutions_text, hash4_offsets_text, config::mlp_width, config::mlp_input_width, config::network_output_width, config::network_parameter_layout.global_rgb_offset, config::network_parameter_layout.total_param_count);
             expected_metadata["hash4_level_count"]        = std::format("{}", config::hash4_level_count);
             expected_metadata["hash4_features_per_level"] = std::format("{}", config::hash4_features_per_level);
             expected_metadata["hash4_max_entries"]        = std::format("{}", config::hash4_max_entries);
@@ -477,8 +524,6 @@ namespace hyfluid::train {
             expected_metadata["global_rgb_offset"]        = std::format("{}", config::network_parameter_layout.global_rgb_offset);
             expected_metadata["total_param_count"]        = std::format("{}", config::network_parameter_layout.total_param_count);
             expected_metadata["sample_coord_floats"]      = std::format("{}", config::sample_coord_floats);
-            expected_metadata["active_sim_min"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_min[0u], config::scalar_real_active_sim_min[1u], config::scalar_real_active_sim_min[2u]);
-            expected_metadata["active_sim_max"]           = std::format("{:.9g},{:.9g},{:.9g}", config::scalar_real_active_sim_max[0u], config::scalar_real_active_sim_max[1u], config::scalar_real_active_sim_max[2u]);
 
             const std::uintmax_t file_size = std::filesystem::file_size(path);
             if (file_size < sizeof(std::uint64_t)) throw std::runtime_error{"weights file is too small for a safetensors header."};

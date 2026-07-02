@@ -72,6 +72,13 @@ namespace hyfluid::project {
             Vector3 forward{};
         };
 
+        struct UnitAabbCamera final {
+            Vector3 right{};
+            Vector3 down{};
+            Vector3 forward{};
+            Vector3 origin{};
+        };
+
         struct DatasetOptions final {
             std::filesystem::path dataset_path;
             std::vector<std::string> frame_sets{"train"};
@@ -234,6 +241,95 @@ namespace hyfluid::project {
             return Vector3{value.z, value.y, value.x};
         }
 
+        [[nodiscard]] std::array<float, 16u> swap_xz_axis(const std::span<const float> matrix) {
+            if (matrix.size() != 16uz) throw std::runtime_error{"matrix must contain 16 values."};
+            std::array<float, 16u> result = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row) {
+                result[row * 4uz + 0uz] = matrix[row * 4uz + 2uz];
+                result[row * 4uz + 1uz] = matrix[row * 4uz + 1uz];
+                result[row * 4uz + 2uz] = matrix[row * 4uz + 0uz];
+                result[row * 4uz + 3uz] = matrix[row * 4uz + 3uz];
+            }
+            for (const float value : result)
+                if (!std::isfinite(value)) throw std::runtime_error{"matrix contains non-finite values."};
+            return result;
+        }
+
+        [[nodiscard]] std::array<float, 16u> invert_matrix_4x4(const std::span<const float> matrix, const std::string_view context) {
+            if (matrix.size() != 16uz) throw std::runtime_error{std::format("{} must contain 16 values.", context)};
+            std::array<float, 32u> inverse_work = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row) {
+                for (std::size_t column = 0uz; column < 4uz; ++column) inverse_work[row * 8uz + column] = matrix[row * 4uz + column];
+                inverse_work[row * 8uz + 4uz + row] = 1.0f;
+            }
+            for (std::size_t pivot_column = 0uz; pivot_column < 4uz; ++pivot_column) {
+                std::size_t pivot_row = pivot_column;
+                float pivot_abs       = std::fabs(inverse_work[pivot_row * 8uz + pivot_column]);
+                for (std::size_t row = pivot_column + 1uz; row < 4uz; ++row) {
+                    const float candidate_abs = std::fabs(inverse_work[row * 8uz + pivot_column]);
+                    if (candidate_abs > pivot_abs) {
+                        pivot_abs = candidate_abs;
+                        pivot_row = row;
+                    }
+                }
+                if (pivot_abs <= 1.0e-12f) throw std::runtime_error{std::format("{} is singular.", context)};
+                if (pivot_row != pivot_column)
+                    for (std::size_t column = 0uz; column < 8uz; ++column) std::swap(inverse_work[pivot_row * 8uz + column], inverse_work[pivot_column * 8uz + column]);
+                const float pivot = inverse_work[pivot_column * 8uz + pivot_column];
+                for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[pivot_column * 8uz + column] /= pivot;
+                for (std::size_t row = 0uz; row < 4uz; ++row) {
+                    if (row == pivot_column) continue;
+                    const float factor = inverse_work[row * 8uz + pivot_column];
+                    for (std::size_t column = 0uz; column < 8uz; ++column) inverse_work[row * 8uz + column] -= factor * inverse_work[pivot_column * 8uz + column];
+                }
+            }
+            std::array<float, 16u> inverse = {};
+            for (std::size_t row = 0uz; row < 4uz; ++row)
+                for (std::size_t column = 0uz; column < 4uz; ++column) inverse[row * 4uz + column] = inverse_work[row * 8uz + 4uz + column];
+            return inverse;
+        }
+
+        [[nodiscard]] UnitAabbCamera unit_aabb_camera_from_transform_matrix(const std::span<const float> transform_matrix, const std::span<const float> voxel_matrix, const std::span<const float> voxel_scale) {
+            if (transform_matrix.size() != 16uz) throw std::runtime_error{"transform_matrix must contain 16 values."};
+            if (voxel_scale.size() != 3uz) throw std::runtime_error{"voxel_scale must contain 3 values."};
+            for (const float value : transform_matrix)
+                if (!std::isfinite(value)) throw std::runtime_error{"transform_matrix contains non-finite values."};
+            for (const float value : voxel_scale)
+                if (!std::isfinite(value) || value == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
+
+            const std::array sim_to_world = swap_xz_axis(voxel_matrix);
+            const std::array world_to_sim = invert_matrix_4x4(std::span<const float>{sim_to_world.data(), sim_to_world.size()}, "voxel_matrix");
+            const std::array raw_origin   = {transform_matrix[3uz], transform_matrix[7uz], transform_matrix[11uz]};
+            const std::array<std::array<float, 3u>, 3u> raw_axes = {{
+                {transform_matrix[0uz], transform_matrix[4uz], transform_matrix[8uz]},
+                {-transform_matrix[1uz], -transform_matrix[5uz], -transform_matrix[9uz]},
+                {-transform_matrix[2uz], -transform_matrix[6uz], -transform_matrix[10uz]},
+            }};
+
+            UnitAabbCamera camera{};
+            camera.origin = Vector3{
+                (world_to_sim[0uz] * raw_origin[0uz] + world_to_sim[1uz] * raw_origin[1uz] + world_to_sim[2uz] * raw_origin[2uz] + world_to_sim[3uz]) / voxel_scale[0uz],
+                (world_to_sim[4uz] * raw_origin[0uz] + world_to_sim[5uz] * raw_origin[1uz] + world_to_sim[6uz] * raw_origin[2uz] + world_to_sim[7uz]) / voxel_scale[1uz],
+                (world_to_sim[8uz] * raw_origin[0uz] + world_to_sim[9uz] * raw_origin[1uz] + world_to_sim[10uz] * raw_origin[2uz] + world_to_sim[11uz]) / voxel_scale[2uz],
+            };
+            camera.right = Vector3{
+                (world_to_sim[0uz] * raw_axes[0uz][0uz] + world_to_sim[1uz] * raw_axes[0uz][1uz] + world_to_sim[2uz] * raw_axes[0uz][2uz]) / voxel_scale[0uz],
+                (world_to_sim[4uz] * raw_axes[0uz][0uz] + world_to_sim[5uz] * raw_axes[0uz][1uz] + world_to_sim[6uz] * raw_axes[0uz][2uz]) / voxel_scale[1uz],
+                (world_to_sim[8uz] * raw_axes[0uz][0uz] + world_to_sim[9uz] * raw_axes[0uz][1uz] + world_to_sim[10uz] * raw_axes[0uz][2uz]) / voxel_scale[2uz],
+            };
+            camera.down = Vector3{
+                (world_to_sim[0uz] * raw_axes[1uz][0uz] + world_to_sim[1uz] * raw_axes[1uz][1uz] + world_to_sim[2uz] * raw_axes[1uz][2uz]) / voxel_scale[0uz],
+                (world_to_sim[4uz] * raw_axes[1uz][0uz] + world_to_sim[5uz] * raw_axes[1uz][1uz] + world_to_sim[6uz] * raw_axes[1uz][2uz]) / voxel_scale[1uz],
+                (world_to_sim[8uz] * raw_axes[1uz][0uz] + world_to_sim[9uz] * raw_axes[1uz][1uz] + world_to_sim[10uz] * raw_axes[1uz][2uz]) / voxel_scale[2uz],
+            };
+            camera.forward = Vector3{
+                (world_to_sim[0uz] * raw_axes[2uz][0uz] + world_to_sim[1uz] * raw_axes[2uz][1uz] + world_to_sim[2uz] * raw_axes[2uz][2uz]) / voxel_scale[0uz],
+                (world_to_sim[4uz] * raw_axes[2uz][0uz] + world_to_sim[5uz] * raw_axes[2uz][1uz] + world_to_sim[6uz] * raw_axes[2uz][2uz]) / voxel_scale[1uz],
+                (world_to_sim[8uz] * raw_axes[2uz][0uz] + world_to_sim[9uz] * raw_axes[2uz][1uz] + world_to_sim[10uz] * raw_axes[2uz][2uz]) / voxel_scale[2uz],
+            };
+            return camera;
+        }
+
         [[nodiscard]] CameraBasis spectra_image_down_camera_basis(Vector3 right, Vector3 down, Vector3 forward, const std::string_view context) {
             right   = normalize(right, std::format("{} right", context));
             down    = normalize(down, std::format("{} down", context));
@@ -303,12 +399,10 @@ namespace hyfluid::project {
             };
         }
 
-        [[nodiscard]] plugin::Camera frame_camera(const dataset::scalar_real::Frame& frame, const std::string& name, const float near_plane, const float far_plane) {
-            const Vector3 camera_x{frame.camera.at(0u), frame.camera.at(1u), frame.camera.at(2u)};
-            const Vector3 camera_y{frame.camera.at(3u), frame.camera.at(4u), frame.camera.at(5u)};
-            const Vector3 camera_z{frame.camera.at(6u), frame.camera.at(7u), frame.camera.at(8u)};
-            const Vector3 origin               = scalar_real_normalized_to_spectra(Vector3{frame.camera.at(9u), frame.camera.at(10u), frame.camera.at(11u)});
-            const CameraBasis basis            = nearest_spectra_image_down_camera_basis(camera_x, camera_y, camera_z, std::format("dataset camera '{}'", name));
+        [[nodiscard]] plugin::Camera frame_camera(const dataset::scalar_real::Dataset& dataset, const dataset::scalar_real::Frame& frame, const std::string& name, const float near_plane, const float far_plane) {
+            const UnitAabbCamera unit_camera   = unit_aabb_camera_from_transform_matrix(std::span<const float>{frame.transform_matrix.data(), frame.transform_matrix.size()}, std::span<const float>{dataset.voxel_matrix.data(), dataset.voxel_matrix.size()}, std::span<const float>{dataset.voxel_scale.data(), dataset.voxel_scale.size()});
+            const Vector3 origin               = scalar_real_normalized_to_spectra(unit_camera.origin);
+            const CameraBasis basis            = nearest_spectra_image_down_camera_basis(unit_camera.right, unit_camera.down, unit_camera.forward, std::format("dataset camera '{}'", name));
             const std::uint64_t expected_bytes = static_cast<std::uint64_t>(frame.width) * static_cast<std::uint64_t>(frame.height) * 4u;
             if (frame.width == 0u || frame.height == 0u) throw std::runtime_error{std::format("dataset camera '{}' image dimensions must be non-zero.", name)};
             if (frame.rgba.size() != expected_bytes) throw std::runtime_error{std::format("dataset camera '{}' image byte count does not match width * height * 4.", name)};
@@ -1083,7 +1177,7 @@ namespace hyfluid::project {
             for (const std::uint32_t view_index : runtime.visible_views) {
                 const std::uint32_t frame_index                 = runtime.frame_indices.at(view_index * runtime.time_count + time_index);
                 const dataset::scalar_real::Frame& scalar_frame = frame_set.frames.at(frame_index);
-                document.cameras.push_back(frame_camera(scalar_frame, std::format("{} view {:04}", runtime.name, view_index), this->state->dataset.near, this->state->dataset.far));
+                document.cameras.push_back(frame_camera(this->state->dataset, scalar_frame, std::format("{} view {:04}", runtime.name, view_index), this->state->dataset.near, this->state->dataset.far));
             }
         }
         if (this->state->sampler_point_cloud.has_value()) {

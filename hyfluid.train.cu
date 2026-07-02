@@ -775,21 +775,15 @@ namespace hyfluid::cuda {
         }
     }
 
-    void upload_dataset(const std::uint8_t* const pixels, const std::size_t pixel_bytes, const float* const camera, const std::size_t camera_count, const float* const intrinsics, const std::size_t intrinsics_count, const float* const times, const std::size_t time_count, const std::uint32_t* const view_indices, const std::size_t view_index_count, const std::uint32_t* const time_indices, const std::size_t time_index_count, const std::uint32_t* const frame_indices, const std::size_t frame_index_count, const std::uint8_t*& out_pixels, const float*& out_camera, const float*& out_intrinsics, const float*& out_times, const std::uint32_t*& out_view_indices, const std::uint32_t*& out_time_indices, const std::uint32_t*& out_frame_indices) {
+    void upload_dataset(const std::uint8_t* const pixels, const std::size_t pixel_bytes, const float* const camera, const std::size_t camera_count, const float* const intrinsics, const std::size_t intrinsics_count, const std::uint32_t* const frame_indices, const std::size_t frame_index_count, const std::uint8_t*& out_pixels, const float*& out_camera, const float*& out_intrinsics, const std::uint32_t*& out_frame_indices) {
         out_pixels        = nullptr;
         out_camera        = nullptr;
         out_intrinsics    = nullptr;
-        out_times         = nullptr;
-        out_view_indices  = nullptr;
-        out_time_indices  = nullptr;
         out_frame_indices = nullptr;
 
-        if (pixels == nullptr || pixel_bytes == 0u || camera == nullptr || camera_count == 0u || intrinsics == nullptr || intrinsics_count == 0u || times == nullptr || time_count == 0u || view_indices == nullptr || view_index_count == 0u || time_indices == nullptr || time_index_count == 0u || frame_indices == nullptr || frame_index_count == 0u) throw std::runtime_error{"invalid dynamic dataset upload input."};
+        if (pixels == nullptr || pixel_bytes == 0u || camera == nullptr || camera_count == 0u || intrinsics == nullptr || intrinsics_count == 0u || frame_indices == nullptr || frame_index_count == 0u) throw std::runtime_error{"invalid dynamic dataset upload input."};
         const std::size_t camera_bytes      = camera_count * sizeof(float);
         const std::size_t intrinsics_bytes  = intrinsics_count * sizeof(float);
-        const std::size_t time_bytes        = time_count * sizeof(float);
-        const std::size_t view_index_bytes  = view_index_count * sizeof(std::uint32_t);
-        const std::size_t time_index_bytes  = time_index_count * sizeof(std::uint32_t);
         const std::size_t frame_index_bytes = frame_index_count * sizeof(std::uint32_t);
 
         void* uploaded_pixels = nullptr;
@@ -806,21 +800,6 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaMalloc(&uploaded_intrinsics, intrinsics_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc intrinsics failed: "} + cudaGetErrorString(status)};
         out_intrinsics = static_cast<float*>(uploaded_intrinsics);
         if (const cudaError_t status = cudaMemcpy(const_cast<float*>(out_intrinsics), intrinsics, intrinsics_bytes, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy intrinsics failed: "} + cudaGetErrorString(status)};
-
-        void* uploaded_times = nullptr;
-        if (const cudaError_t status = cudaMalloc(&uploaded_times, time_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc times failed: "} + cudaGetErrorString(status)};
-        out_times = static_cast<float*>(uploaded_times);
-        if (const cudaError_t status = cudaMemcpy(const_cast<float*>(out_times), times, time_bytes, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy times failed: "} + cudaGetErrorString(status)};
-
-        void* uploaded_view_indices = nullptr;
-        if (const cudaError_t status = cudaMalloc(&uploaded_view_indices, view_index_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc view indices failed: "} + cudaGetErrorString(status)};
-        out_view_indices = static_cast<std::uint32_t*>(uploaded_view_indices);
-        if (const cudaError_t status = cudaMemcpy(const_cast<std::uint32_t*>(out_view_indices), view_indices, view_index_bytes, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy view indices failed: "} + cudaGetErrorString(status)};
-
-        void* uploaded_time_indices = nullptr;
-        if (const cudaError_t status = cudaMalloc(&uploaded_time_indices, time_index_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc time indices failed: "} + cudaGetErrorString(status)};
-        out_time_indices = static_cast<std::uint32_t*>(uploaded_time_indices);
-        if (const cudaError_t status = cudaMemcpy(const_cast<std::uint32_t*>(out_time_indices), time_indices, time_index_bytes, cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy time indices failed: "} + cudaGetErrorString(status)};
 
         void* uploaded_frame_indices = nullptr;
         if (const cudaError_t status = cudaMalloc(&uploaded_frame_indices, frame_index_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc frame indices failed: "} + cudaGetErrorString(status)};

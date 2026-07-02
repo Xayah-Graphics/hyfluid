@@ -185,7 +185,12 @@ int main(const int argc, const char* const* const argv) {
         }
         const hyfluid::inspector::TrainingDomainView training_domain = inspector.training_domain_view();
         std::uint64_t total_pixel_bytes = 0u;
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) total_pixel_bytes += frame_set.pixel_bytes;
+        std::uint64_t total_frame_count  = 0u;
+        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
+            const std::uint64_t frame_count = static_cast<std::uint64_t>(frame_set.view_count) * frame_set.time_count;
+            total_pixel_bytes += static_cast<std::uint64_t>(frame_set.width) * frame_set.height * 4ull * frame_count;
+            total_frame_count += frame_count;
+        }
 
         std::println("HyFluid ScalarReal dataset loaded.");
         std::println("path: {}", dataset_path.string());
@@ -194,12 +199,15 @@ int main(const int argc, const char* const* const argv) {
         std::println("field_metric_extent: [{:.6f}, {:.6f}, {:.6f}]", training_domain.field_metric_extent[0u], training_domain.field_metric_extent[1u], training_domain.field_metric_extent[2u]);
         std::println("frame sets: {}", hyfluid.host.frame_sets.size());
         std::println("videos: {}", dataset.videos.size());
-        std::println("frames: {}", hyfluid.host.frames.size());
+        std::println("frames: {}", total_frame_count);
         std::println("pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
         std::println("train dataset upload: ok");
 
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets)
-            std::println("frame_set '{}': {} frames, {} views x {} times, {:.3f} MiB pixels", frame_set.name, frame_set.frame_count, frame_set.view_count, frame_set.time_count, static_cast<double>(frame_set.pixel_bytes) / 1048576.0);
+        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
+            const std::uint64_t frame_count = static_cast<std::uint64_t>(frame_set.view_count) * frame_set.time_count;
+            const std::uint64_t pixel_bytes = static_cast<std::uint64_t>(frame_set.width) * frame_set.height * 4ull * frame_count;
+            std::println("frame_set '{}': {} frames, {} views x {} times, {:.3f} MiB pixels", frame_set.name, frame_count, frame_set.view_count, frame_set.time_count, static_cast<double>(pixel_bytes) / 1048576.0);
+        }
 
         if (optimize_iterations > 0) {
             std::vector<std::string> optimize_frame_sets;
@@ -221,12 +229,13 @@ int main(const int argc, const char* const* const argv) {
                 bool found_frame_set = false;
                 for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
                     if (frame_set.name != optimize_frame_set) continue;
-                    if (frame_set.frame_count == 0u) {
+                    const std::uint64_t frame_count = static_cast<std::uint64_t>(frame_set.view_count) * frame_set.time_count;
+                    if (frame_count == 0u) {
                         std::println("{}error:{} requested optimization frame set '{}' has no frames.", ansi_red, ansi_reset, optimize_frame_set);
                         return 1;
                     }
-                    optimize_frame_set_weights.push_back(static_cast<std::uint64_t>(frame_set.frame_count));
-                    optimize_frame_set_weight_sum += static_cast<std::uint64_t>(frame_set.frame_count);
+                    optimize_frame_set_weights.push_back(frame_count);
+                    optimize_frame_set_weight_sum += frame_count;
                     found_frame_set = true;
                     break;
                 }

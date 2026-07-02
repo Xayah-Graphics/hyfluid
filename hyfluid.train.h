@@ -20,7 +20,7 @@ namespace hyfluid::cuda {
     }
 
     // Dataset.
-    void upload_dataset(const std::uint8_t* pixels, std::size_t pixel_bytes, const float* camera, std::size_t camera_count, const float* intrinsics, std::size_t intrinsics_count, const float* times, std::size_t time_count, const std::uint32_t* view_indices, std::size_t view_index_count, const std::uint32_t* time_indices, std::size_t time_index_count, const std::uint32_t* frame_indices, std::size_t frame_index_count, const std::uint8_t*& out_pixels, const float*& out_camera, const float*& out_intrinsics, const float*& out_times, const std::uint32_t*& out_view_indices, const std::uint32_t*& out_time_indices, const std::uint32_t*& out_frame_indices);
+    void upload_dataset(const std::uint8_t* pixels, std::size_t pixel_bytes, const float* camera, std::size_t camera_count, const float* intrinsics, std::size_t intrinsics_count, const std::uint32_t* frame_indices, std::size_t frame_index_count, const std::uint8_t*& out_pixels, const float*& out_camera, const float*& out_intrinsics, const std::uint32_t*& out_frame_indices);
     void upload_field_domain(const float* field_to_world_linear, float*& out_field_to_world_linear);
 
     // Sampler.

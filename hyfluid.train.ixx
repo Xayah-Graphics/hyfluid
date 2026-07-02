@@ -6,15 +6,14 @@ namespace hyfluid::train {
     concept DynamicFrameLike = requires(const Frame& frame) {
         requires std::ranges::contiguous_range<decltype((frame.rgba))>;
         requires std::same_as<std::ranges::range_value_t<decltype((frame.rgba))>, std::uint8_t>;
-        requires std::ranges::contiguous_range<decltype((frame.camera))>;
-        requires std::same_as<std::ranges::range_value_t<decltype((frame.camera))>, float>;
+        requires std::ranges::contiguous_range<decltype((frame.transform_matrix))>;
+        requires std::same_as<std::ranges::range_value_t<decltype((frame.transform_matrix))>, float>;
         { frame.width } -> std::convertible_to<std::uint32_t>;
         { frame.height } -> std::convertible_to<std::uint32_t>;
         { frame.focal_x } -> std::convertible_to<float>;
         { frame.focal_y } -> std::convertible_to<float>;
         { frame.principal_x } -> std::convertible_to<float>;
         { frame.principal_y } -> std::convertible_to<float>;
-        { frame.time } -> std::convertible_to<float>;
         { frame.view_index } -> std::convertible_to<std::uint32_t>;
         { frame.time_index } -> std::convertible_to<std::uint32_t>;
     };
@@ -32,9 +31,9 @@ namespace hyfluid::train {
     concept DynamicDatasetLike = requires(const Dataset& dataset) {
         requires std::ranges::input_range<decltype((dataset.frame_sets))>;
         requires DynamicFrameSetLike<std::remove_cvref_t<std::ranges::range_reference_t<decltype((dataset.frame_sets))>>>;
-        requires std::ranges::contiguous_range<decltype((dataset.sim_to_world))>;
+        requires std::ranges::contiguous_range<decltype((dataset.voxel_matrix))>;
         requires std::ranges::contiguous_range<decltype((dataset.voxel_scale))>;
-        requires std::same_as<std::ranges::range_value_t<decltype((dataset.sim_to_world))>, float>;
+        requires std::same_as<std::ranges::range_value_t<decltype((dataset.voxel_matrix))>, float>;
         requires std::same_as<std::ranges::range_value_t<decltype((dataset.voxel_scale))>, float>;
     };
 
@@ -78,14 +77,13 @@ namespace hyfluid::train {
 
     struct FrameView final {
         std::span<const std::uint8_t> rgba;
-        std::span<const float> camera;
+        std::span<const float> transform_matrix;
         std::uint32_t width      = 0u;
         std::uint32_t height     = 0u;
         float focal_x            = 0.0f;
         float focal_y            = 0.0f;
         float principal_x        = 0.0f;
         float principal_y        = 0.0f;
-        float time               = 0.0f;
         std::uint32_t view_index = 0u;
         std::uint32_t time_index = 0u;
     };
@@ -105,19 +103,19 @@ namespace hyfluid::train {
 
             for (const auto& frame_set : dataset.frame_sets) {
                 std::vector<FrameView>& frame_views = frame_views_by_set.emplace_back();
+                if constexpr (std::ranges::sized_range<decltype((frame_set.frames))>) frame_views.reserve(std::ranges::size(frame_set.frames));
                 for (const auto& frame : frame_set.frames) {
                     frame_views.push_back(FrameView{
-                        .rgba        = std::span<const std::uint8_t>{std::ranges::data(frame.rgba), std::ranges::size(frame.rgba)},
-                        .camera      = std::span<const float>{std::ranges::data(frame.camera), std::ranges::size(frame.camera)},
-                        .width       = static_cast<std::uint32_t>(frame.width),
-                        .height      = static_cast<std::uint32_t>(frame.height),
-                        .focal_x     = static_cast<float>(frame.focal_x),
-                        .focal_y     = static_cast<float>(frame.focal_y),
-                        .principal_x = static_cast<float>(frame.principal_x),
-                        .principal_y = static_cast<float>(frame.principal_y),
-                        .time        = static_cast<float>(frame.time),
-                        .view_index  = static_cast<std::uint32_t>(frame.view_index),
-                        .time_index  = static_cast<std::uint32_t>(frame.time_index),
+                        .rgba             = std::span<const std::uint8_t>{std::ranges::data(frame.rgba), std::ranges::size(frame.rgba)},
+                        .transform_matrix = std::span<const float>{std::ranges::data(frame.transform_matrix), std::ranges::size(frame.transform_matrix)},
+                        .width            = static_cast<std::uint32_t>(frame.width),
+                        .height           = static_cast<std::uint32_t>(frame.height),
+                        .focal_x          = static_cast<float>(frame.focal_x),
+                        .focal_y          = static_cast<float>(frame.focal_y),
+                        .principal_x      = static_cast<float>(frame.principal_x),
+                        .principal_y      = static_cast<float>(frame.principal_y),
+                        .view_index       = static_cast<std::uint32_t>(frame.view_index),
+                        .time_index       = static_cast<std::uint32_t>(frame.time_index),
                     });
                 }
                 frame_set_views.push_back(FrameSetView{
@@ -128,7 +126,7 @@ namespace hyfluid::train {
                 });
             }
 
-            this->initialize(std::span<const FrameSetView>{frame_set_views.data(), frame_set_views.size()}, std::span<const float>{std::ranges::data(dataset.sim_to_world), std::ranges::size(dataset.sim_to_world)}, std::span<const float>{std::ranges::data(dataset.voxel_scale), std::ranges::size(dataset.voxel_scale)});
+            this->initialize(std::span<const FrameSetView>{frame_set_views.data(), frame_set_views.size()}, std::span<const float>{std::ranges::data(dataset.voxel_matrix), std::ranges::size(dataset.voxel_matrix)}, std::span<const float>{std::ranges::data(dataset.voxel_scale), std::ranges::size(dataset.voxel_scale)});
         }
 
         ~HyFluid() noexcept;
@@ -143,40 +141,20 @@ namespace hyfluid::train {
         [[nodiscard]] std::expected<void, std::string> load_weights(const std::filesystem::path& path) const;
 
     private:
-        void initialize(std::span<const FrameSetView> frame_sets, std::span<const float> sim_to_world, std::span<const float> voxel_scale);
+        void initialize(std::span<const FrameSetView> frame_sets, std::span<const float> voxel_matrix, std::span<const float> voxel_scale);
 
     public:
         struct HostFrameSet final {
             std::string name;
-            std::uint32_t frame_offset      = 0u;
-            std::uint32_t frame_count       = 0u;
-            std::uint32_t view_count        = 0u;
-            std::uint32_t time_count        = 0u;
-            std::uint32_t width             = 0u;
-            std::uint32_t height            = 0u;
-            std::uint64_t pixel_bytes       = 0u;
-            std::uint64_t camera_values     = 0u;
-            std::uint64_t intrinsics_values = 0u;
-        };
-
-        struct HostFrame final {
-            std::uint32_t frame_set_index = 0u;
-            std::uint32_t width           = 0u;
-            std::uint32_t height          = 0u;
-            float focal_x                 = 0.0f;
-            float focal_y                 = 0.0f;
-            float principal_x             = 0.0f;
-            float principal_y             = 0.0f;
-            float time                    = 0.0f;
-            std::uint32_t view_index      = 0u;
-            std::uint32_t time_index      = 0u;
-            std::uint64_t pixel_offset    = 0u;
+            std::uint32_t view_count = 0u;
+            std::uint32_t time_count = 0u;
+            std::uint32_t width      = 0u;
+            std::uint32_t height     = 0u;
         };
 
         struct HostData {
             // Stable after construction: dynamic dataset metadata.
             std::vector<HostFrameSet> frame_sets        = {};
-            std::vector<HostFrame> frames               = {};
             std::array<float, 9u> field_to_world_linear = {};
 
             // Mutated by optimize(): training step, adaptive batch shape, and latest counters.
@@ -193,9 +171,6 @@ namespace hyfluid::train {
             const std::uint8_t* pixels         = nullptr;
             const float* camera                = nullptr;
             const float* intrinsics            = nullptr;
-            const float* times                 = nullptr;
-            const std::uint32_t* view_indices  = nullptr;
-            const std::uint32_t* time_indices  = nullptr;
             const std::uint32_t* frame_indices = nullptr;
         };
 
