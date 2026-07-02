@@ -18,7 +18,6 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t network_batch_size         = 1u << 18u;
     inline constexpr std::uint32_t network_batch_granularity  = 128u;
     inline constexpr std::uint32_t initial_rays_per_batch     = 1024u;
-    inline constexpr std::uint32_t training_image_downsample  = 2u;
     inline constexpr std::uint32_t nerf_grid_size             = 128u;
     inline constexpr std::uint32_t nerf_grid_cells            = nerf_grid_size * nerf_grid_size * nerf_grid_size;
     inline constexpr std::uint32_t nerf_steps                 = 192u;
@@ -119,7 +118,6 @@ namespace hyfluid::train::config {
     static_assert(mlp_width == 64u);
     static_assert(network_output_width == 1u);
     static_assert(network_batch_size % network_batch_granularity == 0u);
-    static_assert(training_image_downsample != 0u);
     static_assert(sample_coord_floats == 5u);
     static_assert(ray_floats == 6u);
     static_assert(evaluation_tile_pixels != 0u);

@@ -70,68 +70,96 @@ Use labels: \emph{train} is used by Python density training; \emph{test} is held
     \endgroup
 \end{center}
 
-\subsection{Key Dataset Parameters}\label{subsec:key-dataset-parameters}
+\subsection{Device Dataset Layout}\label{subsec:device-dataset-layout}
 
-This subsection expands only parameters whose role is not already obvious from the tables. The point is the geometry encoded by the dataset, not a particular implementation path.
+After initialization, each host frame set \(H_f\) has a device record \(D_f\) at the same index. The record is not a packed struct on the GPU; it is four separately allocated device buffers plus frame-set shape metadata kept on the host. Let
+\[
+    N_f=V_fT_f
+\]
+be the dense frame count for a frame set with \(V_f=\texttt{view\_count}\) and \(T_f=\texttt{time\_count}\). The loaded frames must cover every view-time pair.
 
-\subsubsection{Camera Model}\label{subsubsec:dataset-camera-model}
+\begin{center}
+    \begingroup
+    \scriptsize
+    \resizebox{\columnwidth}{!}{%
+        \begin{tikzpicture}[
+            font=\sffamily\scriptsize,
+            mem/.style={draw, rounded corners=2pt, minimum height=0.58cm, align=center},
+            cell/.style={draw, minimum width=0.72cm, minimum height=0.48cm, align=center},
+            pick/.style={draw=orange!85!black, fill=orange!25, very thick},
+            flow/.style={-{Stealth[length=2.3mm]}, thick, draw=orange!85!black}
+        ]
+            \node[font=\bfseries] at (4.8,0.25) {Device dataset layout for one frame set \(D_f\)};
 
-Let \(\theta_x=\texttt{camera\_angle\_x}\), \(h=\texttt{camera\_hw}=[H,W]\), and \(C=\texttt{transform\_matrix}\). The image plane is a pinhole camera grid with horizontal field of view \(\theta_x\). Its focal length is
-\[
-    f=\frac{0.5W}{\tan(0.5\,\theta_x)}.
-\]
-The corresponding intrinsic matrix is
-\[
-    K=
-    \begin{bmatrix}
-        f & 0 & 0.5W\\
-        0 & f & 0.5H\\
-        0 & 0 & 1
-    \end{bmatrix}.
-\]
-The pose \(C\) places this camera in the dataset 3D coordinate system:
-\[
-    C=
-    \begin{bmatrix}
-        R & o\\
-        0 & 1
-    \end{bmatrix}.
-\]
-For image coordinate \((i,j)\), the corresponding camera-space direction is
-\[
-    d_c=
-    \begin{bmatrix}
-        (i-0.5W)/f\\
-        -(j-0.5H)/f\\
-        -1
-    \end{bmatrix},
-\]
-and the dataset-space ray is
-\[
-    r_o=o,\qquad r_d=R\,d_c.
-\]
-The negative sign in the second component accounts for image rows increasing downward.
+            \node[font=\bfseries] at (1.0,-0.45) {\texttt{frame\_indices}};
+            \node[cell, fill=gray!10] at (0.0,-1.0) {$k_{0,0}$};
+            \node[cell, fill=gray!10] at (0.75,-1.0) {$k_{0,1}$};
+            \node[cell, fill=gray!10] at (1.5,-1.0) {$\cdots$};
+            \node[cell, fill=gray!10] at (2.25,-1.0) {$k_{0,T_f-1}$};
+            \node[cell, fill=gray!10] at (0.0,-1.5) {$\vdots$};
+            \node[cell, pick] (selected-frame) at (0.75,-1.5) {$k_{v,t}=k$};
+            \node[cell, fill=gray!10] at (1.5,-1.5) {$\cdots$};
+            \node[cell, fill=gray!10] at (2.25,-1.5) {$\vdots$};
+            \node[cell, fill=gray!10] at (0.0,-2.0) {$k_{V_f-1,0}$};
+            \node[cell, fill=gray!10] at (0.75,-2.0) {$k_{V_f-1,1}$};
+            \node[cell, fill=gray!10] at (1.5,-2.0) {$\cdots$};
+            \node[cell, fill=gray!10] at (2.25,-2.0) {$k_{V_f-1,T_f-1}$};
 
-\subsubsection{Volume Transform}\label{subsubsec:dataset-volume-transform}
+            \node[mem, pick, minimum width=0.72cm] (frame-k) at (3.25,-1.5) {$k$};
+            \draw[flow] (selected-frame.east) -- node[above, font=\tiny] {dense lookup} (frame-k.west);
 
-Let \(M=\texttt{voxel\_matrix}\) and \(s=\texttt{voxel\_scale}\). Split the spatial part of \(M\) into three axis columns and a translation:
-\[
-    M=
-    \begin{bmatrix}
-        m_x & m_y & m_z & t\\
-        0 & 0 & 0 & 1
-    \end{bmatrix}.
-\]
-For local volume coordinate \(u\in[0,1]^3\), the dataset-space position is
-\[
-    p(u)=t+u_xs_xm_x+u_ys_ym_y+u_zs_zm_z.
-\]
-Thus \(M\) supplies orientation and origin, while \(s\) supplies the per-axis metric scale.
+            \node[anchor=east, font=\bfseries] at (4.15,-0.85) {\texttt{pixels}};
+            \node[mem, fill=blue!10, minimum width=0.95cm] at (4.8,-0.85) {frame 0\\RGBA};
+            \node[mem, fill=blue!10, minimum width=0.7cm] at (5.75,-0.85) {\(\cdots\)};
+            \node[mem, pick, minimum width=1.05cm] (pixels-k) at (6.75,-0.85) {frame \(k\)\\\(4WH\) B};
+            \node[mem, fill=blue!10, minimum width=0.7cm] at (7.75,-0.85) {\(\cdots\)};
+            \node[mem, fill=blue!10, minimum width=1.1cm] at (8.8,-0.85) {frame\\\(N_f-1\)};
 
-\subsubsection{Render-Path Metadata}\label{subsubsec:dataset-render-path}
+            \node[anchor=east, font=\bfseries] at (4.15,-1.75) {\texttt{camera}};
+            \node[mem, fill=green!10, minimum width=0.95cm] at (4.8,-1.75) {camera 0};
+            \node[mem, fill=green!10, minimum width=0.7cm] at (5.75,-1.75) {\(\cdots\)};
+            \node[mem, pick, minimum width=1.7cm] (camera-k) at (7.0,-1.75) {\([\mathrm{right},\mathrm{down},\mathrm{forward},\mathrm{origin}]_k\)\\12 floats};
+            \node[mem, fill=green!10, minimum width=0.7cm] at (8.25,-1.75) {\(\cdots\)};
+            \node[mem, fill=green!10, minimum width=0.95cm] at (9.1,-1.75) {camera\\\(N_f-1\)};
 
-Let \(c_r=\texttt{render\_center}\), \(z_n=\texttt{near}\), \(z_f=\texttt{far}\), \(\varphi=\texttt{phi}\), and \(a=\texttt{rot}\). The pair \(z_n,z_f\) defines the ray-depth interval attached to the dataset. The same pair also gives the nominal spherical render-path radius
+            \node[anchor=east, font=\bfseries] at (4.15,-2.65) {\texttt{intrinsics}};
+            \node[mem, fill=purple!10, minimum width=0.95cm] at (4.8,-2.65) {intr. 0};
+            \node[mem, fill=purple!10, minimum width=0.7cm] at (5.75,-2.65) {\(\cdots\)};
+            \node[mem, pick, minimum width=1.25cm] (intrinsics-k) at (6.9,-2.65) {\([f_x,f_y,c_x,c_y]_k\)\\4 floats};
+            \node[mem, fill=purple!10, minimum width=0.7cm] at (7.95,-2.65) {\(\cdots\)};
+            \node[mem, fill=purple!10, minimum width=0.95cm] at (8.8,-2.65) {intr.\\\(N_f-1\)};
+
+            \draw[flow] (frame-k.east) to[out=15,in=180] (pixels-k.west);
+            \draw[flow] (frame-k.east) -- (camera-k.west);
+            \draw[flow] (frame-k.east) to[out=-15,in=180] (intrinsics-k.west);
+
+            \node[font=\bfseries] at (1.1,-3.15) {\texttt{device.field\_to\_world\_linear}};
+            \node[cell, fill=yellow!20] at (0.15,-3.65) {$a_{00}$};
+            \node[cell, fill=yellow!20] at (0.9,-3.65) {$a_{01}$};
+            \node[cell, fill=yellow!20] at (1.65,-3.65) {$a_{02}$};
+            \node[cell, fill=yellow!20] at (0.15,-4.15) {$a_{10}$};
+            \node[cell, fill=yellow!20] at (0.9,-4.15) {$a_{11}$};
+            \node[cell, fill=yellow!20] at (1.65,-4.15) {$a_{12}$};
+            \node[cell, fill=yellow!20] at (0.15,-4.65) {$a_{20}$};
+            \node[cell, fill=yellow!20] at (0.9,-4.65) {$a_{21}$};
+            \node[cell, fill=yellow!20] at (1.65,-4.65) {$a_{22}$};
+            \node[anchor=west, align=left] at (2.35,-4.15) {row-major \(3\times3\) map\\field-space step \(\rightarrow\) metric length};
+        \end{tikzpicture}%
+    }
+    \par\smallskip
+    \footnotesize\textbf{Figure 1:} Device memory layout of uploaded dataset state.
+    \endgroup
+\end{center}
+
+The sampler and evaluator first resolve a frame index from the dense grid:
 \[
-    \rho=\frac{z_n+z_f}{2}.
+    k=\texttt{frame\_indices}[vT_f+t].
 \]
-The center \(c_r\), elevation \(\varphi\), and rotation axis \(a\) describe the synthetic render path. They do not define the volume transform; in particular, \(c_r\) is not the geometric center of the volume.
+They then read \(\texttt{camera}+12k\), \(\texttt{intrinsics}+4k\), and \(\texttt{pixels}+4kWH\). In the CUDA kernels, the 12 camera floats become
+\[
+    x_c=\texttt{camera}[0{:}3],\quad
+    y_c=\texttt{camera}[3{:}6],\quad
+    z_c=\texttt{camera}[6{:}9],\quad
+    o_c=\texttt{camera}[9{:}12],
+\]
+where \(x_c,y_c,z_c\) are the ray basis in field space and \(o_c\) is the ray origin. All sampled positions therefore live directly in the unit AABB training domain \([0,1]^3\); only \(\texttt{device.field\_to\_world\_linear}\) carries the metric scale needed for step length and loss weighting.

@@ -261,10 +261,8 @@ namespace hyfluid::train {
 
             std::uint64_t evaluation_pixel_capacity = 0ull;
             for (const HostFrameSet& frame_set : this->host.frame_sets) {
-                if (frame_set.width % config::training_image_downsample != 0u || frame_set.height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("frame set '{}' dimensions must be divisible by training image downsample.", frame_set.name)};
-                const std::uint64_t render_width  = frame_set.width / config::training_image_downsample;
-                const std::uint64_t render_height = frame_set.height / config::training_image_downsample;
-                evaluation_pixel_capacity         = std::max(evaluation_pixel_capacity, render_width * render_height);
+                const std::uint64_t render_pixels = static_cast<std::uint64_t>(frame_set.width) * frame_set.height;
+                evaluation_pixel_capacity         = std::max(evaluation_pixel_capacity, render_pixels);
             }
             if (evaluation_pixel_capacity == 0ull || evaluation_pixel_capacity > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation render pixel capacity is invalid."};
             this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
@@ -369,10 +367,9 @@ namespace hyfluid::train {
             const HostFrameSet* const host_frame_set     = std::addressof(this->host.frame_sets[*frame_set_index]);
             const DeviceFrameSet* const device_frame_set = std::addressof(this->device.frame_sets[*frame_set_index]);
             if (host_frame_set->view_count == 0u || host_frame_set->time_count == 0u) throw std::runtime_error{std::format("evaluation frame set '{}' is not a dense view-time grid.", host_frame_set->name)};
-            if (host_frame_set->width % config::training_image_downsample != 0u || host_frame_set->height % config::training_image_downsample != 0u) throw std::runtime_error{std::format("evaluation frame set '{}' dimensions are not divisible by training image downsample.", host_frame_set->name)};
 
-            const std::uint32_t render_width  = host_frame_set->width / config::training_image_downsample;
-            const std::uint32_t render_height = host_frame_set->height / config::training_image_downsample;
+            const std::uint32_t render_width  = host_frame_set->width;
+            const std::uint32_t render_height = host_frame_set->height;
             if (render_width > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) || render_height > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) throw std::runtime_error{"evaluation render dimensions exceed PNG writer limits."};
             const std::uint64_t render_pixels = static_cast<std::uint64_t>(render_width) * render_height;
             if (render_pixels == 0ull || render_pixels > this->host.evaluation_pixel_capacity) throw std::runtime_error{"evaluation render image exceeds allocated capacity."};

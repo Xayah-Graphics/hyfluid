@@ -234,13 +234,11 @@ namespace hyfluid::cuda {
             out_ceil_time_index                 = time_count == 1u ? 0u : ::cuda::std::min(out_floor_time_index + 1u, time_count - 1u);
             out_time_residual                   = fractional_time_index - static_cast<float>(out_floor_time_index);
 
-            const std::uint32_t training_width  = width / train::config::training_image_downsample;
-            const std::uint32_t training_height = height / train::config::training_image_downsample;
-            const float u                       = rng.next_float();
-            const float v                       = rng.next_float();
-            out_pixel_x                         = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(training_width)), training_width - 1u);
-            out_pixel_y                         = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(training_height)), training_height - 1u);
-            out_start_jitter                     = rng.next_float();
+            const float u   = rng.next_float();
+            const float v   = rng.next_float();
+            out_pixel_x     = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(width)), width - 1u);
+            out_pixel_y     = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(height)), height - 1u);
+            out_start_jitter = rng.next_float();
         }
 
         __global__ void generate_training_samples_kernel(const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ ray_counter, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ ray_indices_out, float* __restrict__ rays_out, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
@@ -261,9 +259,8 @@ namespace hyfluid::cuda {
             const std::uint32_t floor_frame_index = frame_indices[view_index * time_count + floor_time_index];
             const float* frame_camera             = camera + static_cast<std::uint64_t>(floor_frame_index) * 12u;
             const float* frame_intrinsics         = intrinsics + static_cast<std::uint64_t>(floor_frame_index) * 4u;
-            constexpr auto training_pixel_scale   = static_cast<float>(train::config::training_image_downsample);
-            const float sample_x                  = (static_cast<float>(pixel_x) + 0.5f) * training_pixel_scale;
-            const float sample_y                  = (static_cast<float>(pixel_y) + 0.5f) * training_pixel_scale;
+            const float sample_x                  = static_cast<float>(pixel_x) + 0.5f;
+            const float sample_y                  = static_cast<float>(pixel_y) + 0.5f;
             const float ray_x                     = (sample_x - frame_intrinsics[2u]) / frame_intrinsics[0u];
             const float ray_y                     = (sample_y - frame_intrinsics[3u]) / frame_intrinsics[1u];
             const float3 camera_x                 = {frame_camera[0], frame_camera[1], frame_camera[2]};
@@ -484,20 +481,13 @@ namespace hyfluid::cuda {
         }
 
         __device__ float3 read_training_rgb(const std::uint8_t* pixels, const std::uint32_t frame_index, const std::uint32_t pixel_x, const std::uint32_t pixel_y, const std::uint32_t width, const std::uint32_t height) {
-            float3 sum                    = {};
-            constexpr std::uint32_t scale = train::config::training_image_downsample;
-            const std::uint32_t base_x    = pixel_x * scale;
-            const std::uint32_t base_y    = pixel_y * scale;
-            for (std::uint32_t y = 0u; y < scale; ++y) {
-                for (std::uint32_t x = 0u; x < scale; ++x) {
-                    const std::uint64_t offset = (static_cast<std::uint64_t>(frame_index) * height * width + static_cast<std::uint64_t>(base_y + y) * width + base_x + x) * 4ull;
-                    sum.x += static_cast<float>(pixels[offset + 0u]);
-                    sum.y += static_cast<float>(pixels[offset + 1u]);
-                    sum.z += static_cast<float>(pixels[offset + 2u]);
-                }
-            }
-            constexpr float norm = 1.0f / (255.0f * static_cast<float>(scale * scale));
-            return {sum.x * norm, sum.y * norm, sum.z * norm};
+            const std::uint64_t offset = (static_cast<std::uint64_t>(frame_index) * height * width + static_cast<std::uint64_t>(pixel_y) * width + pixel_x) * 4ull;
+            constexpr float norm       = 1.0f / 255.0f;
+            return {
+                static_cast<float>(pixels[offset + 0u]) * norm,
+                static_cast<float>(pixels[offset + 1u]) * norm,
+                static_cast<float>(pixels[offset + 2u]) * norm,
+            };
         }
 
         __device__ std::uint8_t to_rgb8(const float value) {
@@ -520,9 +510,8 @@ namespace hyfluid::cuda {
             const std::uint32_t pixel_index     = pixel_offset + i;
             const std::uint32_t pixel_x         = pixel_index % render_width;
             const std::uint32_t pixel_y         = pixel_index / render_width;
-            constexpr auto training_pixel_scale = static_cast<float>(train::config::training_image_downsample);
-            const float sample_x                = (static_cast<float>(pixel_x) + 0.5f) * training_pixel_scale;
-            const float sample_y                = (static_cast<float>(pixel_y) + 0.5f) * training_pixel_scale;
+            const float sample_x                = static_cast<float>(pixel_x) + 0.5f;
+            const float sample_y                = static_cast<float>(pixel_y) + 0.5f;
             const float ray_x                   = (sample_x - frame_intrinsics[2u]) / frame_intrinsics[0u];
             const float ray_y                   = (sample_y - frame_intrinsics[3u]) / frame_intrinsics[1u];
             const float3 camera_x               = {frame_camera[0u], frame_camera[1u], frame_camera[2u]};
@@ -845,7 +834,7 @@ namespace hyfluid::cuda {
 
     void sample_training_batch(const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t current_step, const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint8_t* const occupancy, float* const sample_coords, float* const rays, std::uint32_t* const ray_indices, std::uint32_t* const numsteps, std::uint32_t* const ray_counter, std::uint32_t* const sample_counter) {
         if (camera == nullptr || intrinsics == nullptr || frame_indices == nullptr || field_to_world_linear == nullptr || occupancy == nullptr || sample_coords == nullptr || rays == nullptr || ray_indices == nullptr || numsteps == nullptr || ray_counter == nullptr || sample_counter == nullptr) throw std::runtime_error{"invalid training sampler input."};
-        if (view_count == 0u || time_count == 0u || view_count > std::numeric_limits<std::uint32_t>::max() / time_count || width == 0u || height == 0u || width % train::config::training_image_downsample != 0u || height % train::config::training_image_downsample != 0u || rays_per_batch == 0u || rays_per_batch > train::config::initial_rays_per_batch || sample_limit == 0u || sample_limit > train::config::max_samples) throw std::runtime_error{"invalid training sampler shape."};
+        if (view_count == 0u || time_count == 0u || view_count > std::numeric_limits<std::uint32_t>::max() / time_count || width == 0u || height == 0u || rays_per_batch == 0u || rays_per_batch > train::config::initial_rays_per_batch || sample_limit == 0u || sample_limit > train::config::max_samples) throw std::runtime_error{"invalid training sampler shape."};
         if (const cudaError_t status = cudaMemset(ray_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset sampler ray counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(sample_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset sampler sample counter failed: "} + cudaGetErrorString(status)};
         const std::uint32_t blocks = (rays_per_batch + train::config::threads_per_block - 1u) / train::config::threads_per_block;
@@ -969,9 +958,9 @@ namespace hyfluid::cuda {
     void run_evaluation_image(const std::uint8_t* const pixels, const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t render_pixel_capacity, const std::uint8_t* const occupancy, const std::uint16_t* const params, float* const sample_coords, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace, std::uint32_t* const evaluation_numsteps, std::uint32_t* const evaluation_sample_counter, std::uint32_t* const evaluation_overflow_counter, double* const evaluation_loss_sum, std::uint8_t* const evaluation_pixels, std::uint8_t* const host_evaluation_pixels, double& out_loss_sum) {
         out_loss_sum = 0.0;
         if (pixels == nullptr || camera == nullptr || intrinsics == nullptr || frame_indices == nullptr || field_to_world_linear == nullptr || occupancy == nullptr || params == nullptr || sample_coords == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr || evaluation_numsteps == nullptr || evaluation_sample_counter == nullptr || evaluation_overflow_counter == nullptr || evaluation_loss_sum == nullptr || evaluation_pixels == nullptr || host_evaluation_pixels == nullptr) throw std::runtime_error{"invalid evaluation image input."};
-        if (view_count == 0u || time_count == 0u || view_index >= view_count || time_index >= time_count || width == 0u || height == 0u || width % train::config::training_image_downsample != 0u || height % train::config::training_image_downsample != 0u) throw std::runtime_error{"invalid evaluation image shape."};
-        const std::uint32_t render_width     = width / train::config::training_image_downsample;
-        const std::uint32_t render_height    = height / train::config::training_image_downsample;
+        if (view_count == 0u || time_count == 0u || view_index >= view_count || time_index >= time_count || width == 0u || height == 0u) throw std::runtime_error{"invalid evaluation image shape."};
+        const std::uint32_t render_width     = width;
+        const std::uint32_t render_height    = height;
         const std::uint64_t render_pixels_64 = static_cast<std::uint64_t>(render_width) * render_height;
         if (render_pixels_64 == 0ull || render_pixels_64 > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation image has invalid render dimensions."};
         const auto render_pixels = static_cast<std::uint32_t>(render_pixels_64);
@@ -1009,7 +998,7 @@ namespace hyfluid::cuda {
 
     void compute_training_loss_and_compact_samples(const std::uint32_t rays_per_batch, const std::uint32_t current_step, const std::uint32_t* const ray_counter, const std::uint8_t* const pixels, const std::uint32_t* const frame_indices, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint16_t* const network_output, std::uint32_t* const compacted_sample_counter, const std::uint32_t* const ray_indices, std::uint32_t* const numsteps, const float* const sample_coords, float* const compacted_sample_coords, std::uint16_t* const network_output_gradients, float* const param_gradients, const std::uint16_t* const params, float* const loss_values) {
         if (rays_per_batch == 0u) return;
-        if (ray_counter == nullptr || pixels == nullptr || frame_indices == nullptr || view_count == 0u || time_count == 0u || width == 0u || height == 0u || width % train::config::training_image_downsample != 0u || height % train::config::training_image_downsample != 0u || network_output == nullptr || compacted_sample_counter == nullptr || ray_indices == nullptr || numsteps == nullptr || sample_coords == nullptr || compacted_sample_coords == nullptr || network_output_gradients == nullptr || param_gradients == nullptr || params == nullptr || loss_values == nullptr) throw std::runtime_error{"invalid loss and compaction input."};
+        if (ray_counter == nullptr || pixels == nullptr || frame_indices == nullptr || view_count == 0u || time_count == 0u || width == 0u || height == 0u || network_output == nullptr || compacted_sample_counter == nullptr || ray_indices == nullptr || numsteps == nullptr || sample_coords == nullptr || compacted_sample_coords == nullptr || network_output_gradients == nullptr || param_gradients == nullptr || params == nullptr || loss_values == nullptr) throw std::runtime_error{"invalid loss and compaction input."};
         if (const cudaError_t status = cudaMemset(compacted_sample_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset compacted sample counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(loss_values, 0, static_cast<std::size_t>(rays_per_batch) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset loss values failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(param_gradients, 0, static_cast<std::size_t>(train::config::network_parameter_layout.total_param_count) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset trainable gradients failed: "} + cudaGetErrorString(status)};
