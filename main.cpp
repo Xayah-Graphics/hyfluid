@@ -189,11 +189,11 @@ int main(const int argc, const char* const* const argv) {
 
         std::println("HyFluid ScalarReal dataset loaded.");
         std::println("path: {}", dataset_path.string());
-        std::println("scene_scale: {:.6f}", hyfluid.host.scene_scale);
-        std::println("near/far: {:.6f} / {:.6f}", hyfluid.host.near, hyfluid.host.far);
+        std::println("scene_scale: {:.6f}", dataset.scene_scale);
+        std::println("near/far: {:.6f} / {:.6f}", dataset.near, dataset.far);
         std::println("field_metric_extent: [{:.6f}, {:.6f}, {:.6f}]", training_domain.field_metric_extent[0u], training_domain.field_metric_extent[1u], training_domain.field_metric_extent[2u]);
         std::println("frame sets: {}", hyfluid.host.frame_sets.size());
-        std::println("videos: {}", hyfluid.host.videos.size());
+        std::println("videos: {}", dataset.videos.size());
         std::println("frames: {}", hyfluid.host.frames.size());
         std::println("pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
         std::println("train dataset upload: ok");

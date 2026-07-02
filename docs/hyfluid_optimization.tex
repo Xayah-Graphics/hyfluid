@@ -1,0 +1,59 @@
+\section{Density Optimization}\label{sec:density-optimization}
+
+\subsection{Optimize Algorithm}\label{subsec:optimize-algorithm}
+
+\texttt{HyFluid::optimize} operates on one loaded frame set. The frame-set name selects a host record \(H_f\) and the device record \(D_f\) at the same index.
+
+\begin{center}
+    \begingroup
+    \footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabularx}{\columnwidth}{@{}r>{\raggedright\arraybackslash}X@{}}
+        \toprule
+        \multicolumn{2}{@{}l@{}}{\textbf{Algorithm 1:} \texttt{HyFluid::optimize}} \\
+        \midrule
+        1 & Resolve \((H_f,D_f)\) from \texttt{request.frame\_set}. \\
+        2 & Repeat for \texttt{request.iterations}. \\
+        3 & Sample a training batch from \(D_f\) into ray and sample buffers. \\
+        4 & Evaluate the network on sampled coordinates. \\
+        5 & Compute image loss and compact valid samples. \\
+        6 & Pad the compacted batch to the network granularity. \\
+        7 & Re-evaluate the network on compacted samples. \\
+        8 & Backpropagate density gradients. \\
+        9 & Step the optimizer. \\
+        10 & Read counters, update adaptive sample count, increment step. \\
+        11 & After the loop, read loss and occupancy counters; return stats. \\
+        \bottomrule
+    \end{tabularx}
+    \endgroup
+\end{center}
+
+\begin{center}
+    \begingroup
+    \scriptsize
+    \renewcommand{\arraystretch}{1.12}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabularx}{\columnwidth}{@{}p{0.31\columnwidth}p{0.31\columnwidth}>{\raggedright\arraybackslash}X@{}}
+        \toprule
+        \textbf{State} & \textbf{Used by} & \textbf{Initialized as} \\
+        \midrule
+        \(H_f\) & sampling dimensions, stats & host frame-set metadata. \\
+        \(D_f\) & sampling, loss lookup & uploaded pixels, cameras, intrinsics, frame grid. \\
+        \begin{tabular}[t]{@{}l@{}}
+            \texttt{device.field\_to\_}\\\texttt{world\_linear}
+        \end{tabular}
+        & sampling step metric & uploaded field-domain linear map. \\
+        \texttt{device.occupancy} & sampling skip mask & initially full occupancy grid. \\
+        \texttt{device.params} & network forward/backward & initialized or loaded trainable weights. \\
+        \texttt{host.rays\_per\_batch} & sampler batch size & initial training batch shape. \\
+        \begin{tabular}[t]{@{}l@{}}
+            \texttt{host.inference\_}\\\texttt{sample\_count}
+        \end{tabular}
+        & network batch size & initialized to max batch, then adapted from sampled count. \\
+        \bottomrule
+    \end{tabularx}
+    \par\smallskip
+    \footnotesize\textbf{Table 4:} Initialization anchors for the first optimization algorithm.
+    \endgroup
+\end{center}

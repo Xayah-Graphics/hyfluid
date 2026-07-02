@@ -11,25 +11,16 @@ module hyfluid.train;
 import std;
 
 namespace hyfluid::train {
-    void HyFluid::initialize(const DatasetView& dataset) {
+    void HyFluid::initialize(const std::span<const FrameSetView> frame_sets, const std::span<const float> sim_to_world, const std::span<const float> voxel_scale) {
         try {
-            if (!std::isfinite(dataset.scene_scale) || dataset.scene_scale <= 0.0f) throw std::runtime_error{"scene scale must be finite and positive."};
-            if (!std::isfinite(dataset.near) || !std::isfinite(dataset.far) || dataset.near <= 0.0f || dataset.far <= dataset.near) throw std::runtime_error{"dynamic dataset near/far is invalid."};
-            if (!std::isfinite(dataset.phi)) throw std::runtime_error{"dynamic dataset phi must be finite."};
-            if (dataset.rotation_axis != 'Y' && dataset.rotation_axis != 'Z') throw std::runtime_error{"dynamic dataset rotation_axis must be Y or Z."};
-            if (dataset.frame_sets.empty()) throw std::runtime_error{"dynamic dataset must contain at least one frame set."};
-            if (dataset.videos.empty()) throw std::runtime_error{"dynamic dataset must contain video metadata."};
-            if (dataset.sim_to_world.size() != 16uz) throw std::runtime_error{"sim_to_world must contain 16 values."};
-            if (dataset.world_to_sim.size() != 16uz) throw std::runtime_error{"world_to_sim must contain 16 values."};
-            if (dataset.voxel_scale.size() != 3uz) throw std::runtime_error{"voxel_scale must contain 3 values."};
-            if (dataset.render_center.size() != 3uz) throw std::runtime_error{"render_center must contain 3 values."};
+            if (frame_sets.empty()) throw std::runtime_error{"dynamic dataset must contain at least one frame set."};
+            if (sim_to_world.size() != 16uz) throw std::runtime_error{"sim_to_world must contain 16 values."};
+            if (voxel_scale.size() != 3uz) throw std::runtime_error{"voxel_scale must contain 3 values."};
             for (std::size_t i = 0uz; i < 16uz; ++i) {
-                if (!std::isfinite(dataset.sim_to_world[i])) throw std::runtime_error{"sim_to_world contains non-finite values."};
-                if (!std::isfinite(dataset.world_to_sim[i])) throw std::runtime_error{"world_to_sim contains non-finite values."};
+                if (!std::isfinite(sim_to_world[i])) throw std::runtime_error{"sim_to_world contains non-finite values."};
             }
             for (std::size_t i = 0uz; i < 3uz; ++i) {
-                if (!std::isfinite(dataset.voxel_scale[i]) || dataset.voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
-                if (!std::isfinite(dataset.render_center[i])) throw std::runtime_error{"render_center contains non-finite values."};
+                if (!std::isfinite(voxel_scale[i]) || voxel_scale[i] == 0.0f) throw std::runtime_error{"voxel_scale contains invalid values."};
             }
             constexpr std::array field_sim_extent = {
                 config::scalar_real_active_sim_max[0u] - config::scalar_real_active_sim_min[0u],
@@ -39,11 +30,8 @@ namespace hyfluid::train {
             for (const float extent : field_sim_extent)
                 if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"ScalarReal active simulation box is invalid."};
             for (std::size_t row = 0uz; row < 3uz; ++row) {
-                this->host.field_to_world_translation[row] = dataset.sim_to_world[row * 4uz + 3uz];
                 for (std::size_t column = 0uz; column < 3uz; ++column) {
-                    const float sim_coordinate = config::scalar_real_active_sim_min[column] * dataset.voxel_scale[column];
-                    this->host.field_to_world_translation[row] += dataset.sim_to_world[row * 4uz + column] * sim_coordinate;
-                    this->host.field_to_world_linear[row * 3uz + column] = dataset.sim_to_world[row * 4uz + column] * dataset.voxel_scale[column] * field_sim_extent[column];
+                    this->host.field_to_world_linear[row * 3uz + column] = sim_to_world[row * 4uz + column] * voxel_scale[column] * field_sim_extent[column];
                 }
             }
             for (std::size_t column = 0uz; column < 3uz; ++column) {
@@ -53,19 +41,14 @@ namespace hyfluid::train {
                 const float extent = std::sqrt(x * x + y * y + z * z);
                 if (!std::isfinite(extent) || extent <= 0.0f) throw std::runtime_error{"Field domain metric extent is invalid."};
             }
-            this->host.scene_scale   = dataset.scene_scale;
-            this->host.near          = dataset.near;
-            this->host.far           = dataset.far;
-            this->host.phi           = dataset.phi;
-            this->host.rotation_axis = dataset.rotation_axis;
 
             // ====================================================================================================
             // 1. UPLOAD FRAME SETS TO GPU
             // ====================================================================================================
             {
-                this->host.frame_sets.reserve(dataset.frame_sets.size());
-                this->device.frame_sets.reserve(dataset.frame_sets.size());
-                for (const FrameSetView& frame_set : dataset.frame_sets) {
+                this->host.frame_sets.reserve(frame_sets.size());
+                this->device.frame_sets.reserve(frame_sets.size());
+                for (const FrameSetView& frame_set : frame_sets) {
                     if (frame_set.name.empty()) throw std::runtime_error{"frame set name must not be empty."};
                     if (frame_set.view_count == 0u || frame_set.time_count == 0u) throw std::runtime_error{std::format("frame set '{}' must declare positive view_count and time_count.", frame_set.name)};
                     if (frame_set.frames.empty()) throw std::runtime_error{std::format("frame set '{}' contains no frames.", frame_set.name)};
@@ -176,58 +159,6 @@ namespace hyfluid::train {
                         .camera_values     = camera.size(),
                         .intrinsics_values = intrinsics.size(),
                     });
-                }
-            }
-
-            // ====================================================================================================
-            // 2. VALIDATE VIDEO METADATA
-            // ====================================================================================================
-            {
-                std::vector<std::vector<std::uint8_t>> video_seen_by_frame_set;
-                video_seen_by_frame_set.reserve(this->host.frame_sets.size());
-                std::vector video_count_by_frame_set(this->host.frame_sets.size(), 0u);
-                for (const HostFrameSet& frame_set : this->host.frame_sets) video_seen_by_frame_set.emplace_back(frame_set.view_count, 0u);
-                for (const VideoView& video : dataset.videos) {
-                    if (video.frame_set.empty()) throw std::runtime_error{"video frame_set must not be empty."};
-                    if (video.file_name.empty()) throw std::runtime_error{"video file_name must not be empty."};
-                    std::uint32_t frame_set_index = std::numeric_limits<std::uint32_t>::max();
-                    for (std::size_t i = 0uz; i < this->host.frame_sets.size(); ++i) {
-                        if (this->host.frame_sets[i].name == video.frame_set) {
-                            frame_set_index = static_cast<std::uint32_t>(i);
-                            break;
-                        }
-                    }
-                    if (frame_set_index == std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("video '{}' references unloaded frame set '{}'.", video.file_name, video.frame_set)};
-                    const HostFrameSet& host_frame_set = this->host.frame_sets[frame_set_index];
-                    if (video.camera.size() != 12uz) throw std::runtime_error{std::format("video '{}' contains {} camera values; expected 12.", video.file_name, video.camera.size())};
-                    if (video.width != host_frame_set.width || video.height != host_frame_set.height) throw std::runtime_error{std::format("video '{}' dimensions do not match frame set '{}'.", video.file_name, video.frame_set)};
-                    if (video.frame_count != host_frame_set.time_count) throw std::runtime_error{std::format("video '{}' frame_count does not match frame set time_count.", video.file_name)};
-                    if (video.frame_rate == 0u) throw std::runtime_error{std::format("video '{}' frame_rate must be positive.", video.file_name)};
-                    if (video.view_index >= host_frame_set.view_count) throw std::runtime_error{std::format("video '{}' view_index is outside frame set view_count.", video.file_name)};
-                    if (!std::isfinite(video.focal) || video.focal <= 0.0f) throw std::runtime_error{std::format("video '{}' focal must be finite and positive.", video.file_name)};
-                    for (const float camera_value : video.camera)
-                        if (!std::isfinite(camera_value)) throw std::runtime_error{std::format("video '{}' contains non-finite camera values.", video.file_name)};
-                    if (video_seen_by_frame_set[frame_set_index][video.view_index] != 0u) throw std::runtime_error{std::format("frame set '{}' contains duplicate video view_index {}.", video.frame_set, video.view_index)};
-                    video_seen_by_frame_set[frame_set_index][video.view_index] = 1u;
-                    ++video_count_by_frame_set[frame_set_index];
-
-                    HostVideo host_video{
-                        .frame_set       = std::string{video.frame_set},
-                        .file_name       = std::string{video.file_name},
-                        .frame_set_index = frame_set_index,
-                        .width           = video.width,
-                        .height          = video.height,
-                        .frame_count     = video.frame_count,
-                        .frame_rate      = video.frame_rate,
-                        .view_index      = video.view_index,
-                        .focal           = video.focal,
-                    };
-                    for (std::size_t i = 0uz; i < 12uz; ++i) host_video.camera[i] = video.camera[i];
-                    this->host.videos.push_back(std::move(host_video));
-                }
-                for (std::size_t frame_set_index = 0uz; frame_set_index < this->host.frame_sets.size(); ++frame_set_index) {
-                    const HostFrameSet& frame_set = this->host.frame_sets[frame_set_index];
-                    if (video_count_by_frame_set[frame_set_index] != frame_set.view_count) throw std::runtime_error{std::format("frame set '{}' must contain one video metadata entry per view.", frame_set.name)};
                 }
             }
 

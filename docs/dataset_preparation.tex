@@ -4,19 +4,19 @@
 
 ScalarReal is this project's local five-video subset of ScalarFlow, introduced by \citet{eckert2019scalarflow} for real-world scalar transport. The public release contains 104 reconstructions, each with 150 frames of 3D density, 3D velocity, rendered images, and input images~\citep{scalarflowData2019}. This subset contains five camera videos and \texttt{info.json}; tables follow JSON field order.
 
-\noindent\textbf{Split fields.}
+Use labels: \emph{train} is used by Python density training; \emph{test} is held out; \emph{render} builds the synthetic render path; \emph{no} is unused there.
 
 \begin{center}
     \begingroup
     \scriptsize
     \renewcommand{\arraystretch}{1.1}
     \setlength{\tabcolsep}{3pt}
-    \begin{tabularx}{\columnwidth}{@{}llXcc@{}}
+    \begin{tabularx}{\columnwidth}{@{}ll>{\raggedright\arraybackslash}Xccl@{}}
         \toprule
-        \textbf{Split} & \textbf{Source field} & \textbf{Files} & \textbf{Views} & \textbf{Frames/view} \\
+        \textbf{Split} & \textbf{JSON} & \textbf{Files} & \textbf{V} & \textbf{F/view} & \textbf{Use} \\
         \midrule
-        train & \texttt{train\_videos} & \texttt{train00,01,03,04} & 4 & 120 \\
-        test & \texttt{test\_videos} & \texttt{train02} & 1 & 120 \\
+        train & \texttt{train\_videos} & \texttt{00,01,03,04} & 4 & 120 & train \\
+        test & \texttt{test\_videos} & \texttt{02} & 1 & 120 & test \\
         \bottomrule
     \end{tabularx}
     \par\smallskip
@@ -24,23 +24,21 @@ ScalarReal is this project's local five-video subset of ScalarFlow, introduced b
     \endgroup
 \end{center}
 
-\noindent\textbf{Per-video fields.}
-
 \begin{center}
     \begingroup
     \scriptsize
     \renewcommand{\arraystretch}{1.1}
     \setlength{\tabcolsep}{3pt}
-    \begin{tabularx}{\columnwidth}{@{}llX@{}}
+    \begin{tabularx}{\columnwidth}{@{}ll>{\raggedright\arraybackslash}Xl@{}}
         \toprule
-        \textbf{Field} & \textbf{Value} & \textbf{Dataset meaning} \\
+        \textbf{Field} & \textbf{Value} & \textbf{Meaning} & \textbf{Use} \\
         \midrule
-        \texttt{file\_name} & per video & video file path \\
-        \texttt{frame\_rate} & 30 & video FPS \\
-        \texttt{frame\_num} & 120 & video length \\
-        \texttt{camera\_angle\_x} & per video & horizontal FOV \\
-        \texttt{camera\_hw} & \([1920,1080]\) & image \([H,W]\) \\
-        \texttt{transform\_matrix} & per video & camera pose \\
+        \texttt{file\_name} & per video & video file path & train \\
+        \texttt{frame\_rate} & 30 & video FPS & no \\
+        \texttt{frame\_num} & 120 & video length & train \\
+        \texttt{camera\_angle\_x} & per video & horizontal FOV & train \\
+        \texttt{camera\_hw} & \([1920,1080]\) & image \([H,W]\) & no \\
+        \texttt{transform\_matrix} & per video & camera pose & train \\
         \bottomrule
     \end{tabularx}
     \par\smallskip
@@ -48,28 +46,92 @@ ScalarReal is this project's local five-video subset of ScalarFlow, introduced b
     \endgroup
 \end{center}
 
-\noindent\textbf{Global fields.}
-
 \begin{center}
     \begingroup
     \scriptsize
     \renewcommand{\arraystretch}{1.1}
     \setlength{\tabcolsep}{3pt}
-    \begin{tabularx}{\columnwidth}{@{}llX@{}}
+    \begin{tabularx}{\columnwidth}{@{}ll>{\raggedright\arraybackslash}Xl@{}}
         \toprule
-        \textbf{Field} & \textbf{Value} & \textbf{Dataset meaning} \\
+        \textbf{Field} & \textbf{Value} & \textbf{Meaning} & \textbf{Use} \\
         \midrule
-        \texttt{frame\_bkg\_color} & \([0,0,0]\) & background color \\
-        \texttt{voxel\_scale} & \([0.4909,0.73635,0.4909]\) & voxel scale \\
-        \texttt{voxel\_matrix} & 4x4 & voxel transform \\
-        \texttt{render\_center} & \([0.338,0.388,-0.261]\) & render center \\
-        \texttt{near} & \(1.1\) & near plane \\
-        \texttt{far} & \(1.5\) & far plane \\
-        \texttt{phi} & \(20.0\) & rotation angle \\
-        \texttt{rot} & \texttt{Y} & rotation axis \\
+        \texttt{frame\_bkg\_color} & \([0,0,0]\) & background color & no \\
+        \texttt{voxel\_scale} & \([0.4909,0.73635,0.4909]\) & voxel scale & train \\
+        \texttt{voxel\_matrix} & 4x4 & voxel transform & train \\
+        \texttt{render\_center} & \([0.338,0.388,-0.261]\) & render-path center & render \\
+        \texttt{near} & \(1.1\) & near plane & train \\
+        \texttt{far} & \(1.5\) & far plane & train \\
+        \texttt{phi} & \(20.0\) & rotation angle & render \\
+        \texttt{rot} & \texttt{Y} & rotation axis & render \\
         \bottomrule
     \end{tabularx}
     \par\smallskip
     \footnotesize\textbf{Table 3:} Global fields.
     \endgroup
 \end{center}
+
+\subsection{Key Dataset Parameters}\label{subsec:key-dataset-parameters}
+
+This subsection expands only parameters whose role is not already obvious from the tables. The point is the geometry encoded by the dataset, not a particular implementation path.
+
+\subsubsection{Camera Model}\label{subsubsec:dataset-camera-model}
+
+Let \(\theta_x=\texttt{camera\_angle\_x}\), \(h=\texttt{camera\_hw}=[H,W]\), and \(C=\texttt{transform\_matrix}\). The image plane is a pinhole camera grid with horizontal field of view \(\theta_x\). Its focal length is
+\[
+    f=\frac{0.5W}{\tan(0.5\,\theta_x)}.
+\]
+The corresponding intrinsic matrix is
+\[
+    K=
+    \begin{bmatrix}
+        f & 0 & 0.5W\\
+        0 & f & 0.5H\\
+        0 & 0 & 1
+    \end{bmatrix}.
+\]
+The pose \(C\) places this camera in the dataset 3D coordinate system:
+\[
+    C=
+    \begin{bmatrix}
+        R & o\\
+        0 & 1
+    \end{bmatrix}.
+\]
+For image coordinate \((i,j)\), the corresponding camera-space direction is
+\[
+    d_c=
+    \begin{bmatrix}
+        (i-0.5W)/f\\
+        -(j-0.5H)/f\\
+        -1
+    \end{bmatrix},
+\]
+and the dataset-space ray is
+\[
+    r_o=o,\qquad r_d=R\,d_c.
+\]
+The negative sign in the second component accounts for image rows increasing downward.
+
+\subsubsection{Volume Transform}\label{subsubsec:dataset-volume-transform}
+
+Let \(M=\texttt{voxel\_matrix}\) and \(s=\texttt{voxel\_scale}\). Split the spatial part of \(M\) into three axis columns and a translation:
+\[
+    M=
+    \begin{bmatrix}
+        m_x & m_y & m_z & t\\
+        0 & 0 & 0 & 1
+    \end{bmatrix}.
+\]
+For local volume coordinate \(u\in[0,1]^3\), the dataset-space position is
+\[
+    p(u)=t+u_xs_xm_x+u_ys_ym_y+u_zs_zm_z.
+\]
+Thus \(M\) supplies orientation and origin, while \(s\) supplies the per-axis metric scale.
+
+\subsubsection{Render-Path Metadata}\label{subsubsec:dataset-render-path}
+
+Let \(c_r=\texttt{render\_center}\), \(z_n=\texttt{near}\), \(z_f=\texttt{far}\), \(\varphi=\texttt{phi}\), and \(a=\texttt{rot}\). The pair \(z_n,z_f\) defines the ray-depth interval attached to the dataset. The same pair also gives the nominal spherical render-path radius
+\[
+    \rho=\frac{z_n+z_f}{2}.
+\]
+The center \(c_r\), elevation \(\varphi\), and rotation axis \(a\) describe the synthetic render path. They do not define the volume transform; in particular, \(c_r\) is not the geometric center of the volume.
