@@ -164,7 +164,7 @@ namespace hyfluid::cuda {
             return pos.x >= 0.0f && pos.x <= 1.0f && pos.y >= 0.0f && pos.y <= 1.0f && pos.z >= 0.0f && pos.z <= 1.0f;
         }
 
-        __device__ bool intersect_unit_aabb(const float3 origin, const float3 direction, float& out_tmin) {
+        __device__ bool intersect_unit_aabb(const float3 origin, const float3 direction, float& out_tmin, float& out_tmax) {
             const float3 inv_dir = {1.0f / direction.x, 1.0f / direction.y, 1.0f / direction.z};
             const float3 t0      = {-origin.x * inv_dir.x, -origin.y * inv_dir.y, -origin.z * inv_dir.z};
             const float3 t1      = {(1.0f - origin.x) * inv_dir.x, (1.0f - origin.y) * inv_dir.y, (1.0f - origin.z) * inv_dir.z};
@@ -177,7 +177,8 @@ namespace hyfluid::cuda {
             const float tmin     = fmaxf(fmaxf(tx_min, ty_min), tz_min);
             const float tmax     = fminf(fminf(tx_max, ty_max), tz_max);
             out_tmin             = fmaxf(tmin, 0.0f);
-            return tmax >= out_tmin;
+            out_tmax             = tmax;
+            return out_tmax >= out_tmin;
         }
 
         __device__ float field_metric_per_unit(const float* field_to_world_linear, const float3 direction) {
@@ -211,17 +212,17 @@ namespace hyfluid::cuda {
             return (occupancy[index / 8u] & (1u << (index % 8u))) != 0u;
         }
 
-        __device__ float advance_to_next_density_voxel(const float t, const float3 pos, const float3 direction, const float3 inv_direction) {
+        __device__ float advance_to_next_density_voxel(const float t, const float3 pos, const float3 direction, const float3 inv_direction, const float step_size) {
             constexpr auto scale = static_cast<float>(train::config::nerf_grid_size);
             const float3 p       = {(pos.x - 0.5f) * scale, (pos.y - 0.5f) * scale, (pos.z - 0.5f) * scale};
             const float tx       = (floorf(p.x + 0.5f + 0.5f * copysignf(1.0f, direction.x)) - p.x) * inv_direction.x;
             const float ty       = (floorf(p.y + 0.5f + 0.5f * copysignf(1.0f, direction.y)) - p.y) * inv_direction.y;
             const float tz       = (floorf(p.z + 0.5f + 0.5f * copysignf(1.0f, direction.z)) - p.z) * inv_direction.z;
             const float t_target = t + fmaxf(fminf(fminf(tx, ty), tz) / scale, 0.0f);
-            return t + ceilf(fmaxf((t_target - t) / train::config::min_cone_stepsize, 0.5f)) * train::config::min_cone_stepsize;
+            return t + ceilf(fmaxf((t_target - t) / step_size, 0.5f)) * step_size;
         }
 
-        __device__ void replay_training_ray_rng(const std::uint32_t ray_index, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, std::uint32_t& out_view_index, std::uint32_t& out_floor_time_index, std::uint32_t& out_ceil_time_index, float& out_time_residual, std::uint32_t& out_pixel_x, std::uint32_t& out_pixel_y, float& out_start_jitter) {
+        __device__ void replay_training_ray_rng(const std::uint32_t ray_index, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, std::uint32_t& out_view_index, std::uint32_t& out_floor_time_index, std::uint32_t& out_ceil_time_index, float& out_time_residual, std::uint32_t& out_pixel_x, std::uint32_t& out_pixel_y, float& out_ray_phase) {
             Pcg32 rng{train::config::train_seed};
             rng.advance(static_cast<std::uint64_t>(current_step) << 32u);
             rng.advance(static_cast<std::uint64_t>(ray_index) * train::config::max_random_samples_per_ray);
@@ -238,7 +239,7 @@ namespace hyfluid::cuda {
             const float v   = rng.next_float();
             out_pixel_x     = ::cuda::std::min(static_cast<std::uint32_t>(u * static_cast<float>(width)), width - 1u);
             out_pixel_y     = ::cuda::std::min(static_cast<std::uint32_t>(v * static_cast<float>(height)), height - 1u);
-            out_start_jitter = rng.next_float();
+            out_ray_phase    = rng.next_float();
         }
 
         __global__ void generate_training_samples_kernel(const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ ray_counter, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ ray_indices_out, float* __restrict__ rays_out, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
@@ -251,8 +252,8 @@ namespace hyfluid::cuda {
             float time_residual            = 0.0f;
             std::uint32_t pixel_x          = 0u;
             std::uint32_t pixel_y          = 0u;
-            float start_jitter             = 0.0f;
-            replay_training_ray_rng(i, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, start_jitter);
+            float ray_phase                = 0.0f;
+            replay_training_ray_rng(i, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, ray_phase);
 
             const auto max_time_index             = static_cast<float>(time_count - 1u);
             const float normalized_time           = time_count == 1u ? 0.0f : (static_cast<float>(floor_time_index) + time_residual) / max_time_index;
@@ -295,25 +296,26 @@ namespace hyfluid::cuda {
             numsteps_out[ray_index * 2u + 1u] = 0u;
 
             float tmin = 0.0f;
-            if (!intersect_unit_aabb(ray_origin, ray_direction_normalized, tmin)) return;
+            float tmax = 0.0f;
+            if (!intersect_unit_aabb(ray_origin, ray_direction_normalized, tmin, tmax)) return;
 
-            constexpr float dt         = train::config::min_cone_stepsize;
+            constexpr float dt         = train::config::training_ray_stepsize;
             const float dt_metric      = dt * metric_per_field_unit;
-            const float start_t        = tmin + start_jitter * dt;
+            const float start_t        = fmaf(ray_phase, dt, tmin);
             const float3 inv_direction = {1.0f / ray_direction_normalized.x, 1.0f / ray_direction_normalized.y, 1.0f / ray_direction_normalized.z};
 
             std::uint32_t numsteps = 0u;
             float t                = start_t;
             float3 pos             = {};
 
-            while (numsteps < train::config::nerf_steps) {
+            while (numsteps < train::config::training_ray_steps && t <= tmax) {
                 pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
                 if (!unit_aabb_contains(pos)) break;
                 if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
                     ++numsteps;
                     t += dt;
                 } else {
-                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction);
+                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction, dt);
                 }
             }
 
@@ -329,7 +331,7 @@ namespace hyfluid::cuda {
 
             t               = start_t;
             std::uint32_t j = 0u;
-            while (j < stored_numsteps) {
+            while (j < stored_numsteps && t <= tmax) {
                 pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
                 if (!unit_aabb_contains(pos)) break;
                 if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
@@ -342,7 +344,7 @@ namespace hyfluid::cuda {
                     ++j;
                     t += dt;
                 } else {
-                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction);
+                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction, dt);
                 }
             }
         }
@@ -495,7 +497,7 @@ namespace hyfluid::cuda {
             return static_cast<std::uint8_t>(clamped * 255.0f + 0.5f);
         }
 
-        __global__ void generate_evaluation_samples_kernel(const std::uint32_t tile_pixel_count, const std::uint32_t pixel_offset, const std::uint32_t sample_limit, const std::uint32_t render_width, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t time_count, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ overflow_counter, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
+        __global__ void generate_evaluation_samples_kernel(const std::uint32_t tile_pixel_count, const std::uint32_t pixel_offset, const std::uint32_t sample_limit, const std::uint32_t render_width, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t time_count, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ overflow_counter, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
             const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i >= tile_pixel_count) return;
 
@@ -532,25 +534,15 @@ namespace hyfluid::cuda {
             if (!isfinite(metric_per_field_unit) || metric_per_field_unit <= 0.0f) return;
 
             float tmin = 0.0f;
-            if (!intersect_unit_aabb(ray_origin, ray_direction_normalized, tmin)) return;
+            float tmax = 0.0f;
+            if (!intersect_unit_aabb(ray_origin, ray_direction_normalized, tmin, tmax)) return;
 
-            constexpr float dt         = train::config::min_cone_stepsize;
-            const float dt_metric      = dt * metric_per_field_unit;
-            const float3 inv_direction = {1.0f / ray_direction_normalized.x, 1.0f / ray_direction_normalized.y, 1.0f / ray_direction_normalized.z};
+            constexpr float dt    = train::config::evaluation_ray_stepsize;
+            const float dt_metric = dt * metric_per_field_unit;
+            const float start_t   = tmin + 0.5f * dt;
 
             std::uint32_t numsteps = 0u;
-            float t                = tmin;
-            float3 pos             = {};
-            while (numsteps < train::config::nerf_steps) {
-                pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
-                if (!unit_aabb_contains(pos)) break;
-                if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
-                    ++numsteps;
-                    t += dt;
-                } else {
-                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction);
-                }
-            }
+            for (float t = start_t; numsteps < train::config::evaluation_ray_steps && t <= tmax; t += dt) ++numsteps;
 
             if (numsteps == 0u) return;
 
@@ -566,23 +558,16 @@ namespace hyfluid::cuda {
             numsteps_out[i * 2u + 0u] = stored_numsteps;
             numsteps_out[i * 2u + 1u] = base;
 
-            t               = tmin;
-            std::uint32_t j = 0u;
-            while (j < stored_numsteps) {
-                pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
-                if (!unit_aabb_contains(pos)) break;
-                if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
-                    float* coord = coords_out + static_cast<std::uint64_t>(base + j) * train::config::sample_coord_floats;
-                    coord[0u]    = pos.x;
-                    coord[1u]    = pos.y;
-                    coord[2u]    = pos.z;
-                    coord[3u]    = normalized_time;
-                    coord[4u]    = dt_metric;
-                    ++j;
-                    t += dt;
-                } else {
-                    t = advance_to_next_density_voxel(t, pos, ray_direction_normalized, inv_direction);
-                }
+            float t = start_t;
+            for (std::uint32_t j = 0u; j < stored_numsteps; ++j) {
+                const float3 pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
+                float* coord    = coords_out + static_cast<std::uint64_t>(base + j) * train::config::sample_coord_floats;
+                coord[0u]       = pos.x;
+                coord[1u]       = pos.y;
+                coord[2u]       = pos.z;
+                coord[3u]       = normalized_time;
+                coord[4u]       = dt_metric;
+                t += dt;
             }
         }
 
@@ -655,8 +640,8 @@ namespace hyfluid::cuda {
             float time_residual            = 0.0f;
             std::uint32_t pixel_x          = 0u;
             std::uint32_t pixel_y          = 0u;
-            float ignored_jitter           = 0.0f;
-            replay_training_ray_rng(ray_index, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, ignored_jitter);
+            float ignored_ray_phase        = 0.0f;
+            replay_training_ray_rng(ray_index, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, ignored_ray_phase);
             const std::uint32_t floor_frame_index = frame_indices[view_index * time_count + floor_time_index];
             const std::uint32_t ceil_frame_index  = frame_indices[view_index * time_count + ceil_time_index];
             const float3 floor_rgb                = read_training_rgb(pixels, floor_frame_index, pixel_x, pixel_y, width, height);
@@ -955,9 +940,9 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"relu output failed: "} + cudaGetErrorString(status)};
     }
 
-    void run_evaluation_image(const std::uint8_t* const pixels, const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t render_pixel_capacity, const std::uint8_t* const occupancy, const std::uint16_t* const params, float* const sample_coords, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace, std::uint32_t* const evaluation_numsteps, std::uint32_t* const evaluation_sample_counter, std::uint32_t* const evaluation_overflow_counter, double* const evaluation_loss_sum, std::uint8_t* const evaluation_pixels, std::uint8_t* const host_evaluation_pixels, double& out_loss_sum) {
+    void run_evaluation_image(const std::uint8_t* const pixels, const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t render_pixel_capacity, const std::uint16_t* const params, float* const sample_coords, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace, std::uint32_t* const evaluation_numsteps, std::uint32_t* const evaluation_sample_counter, std::uint32_t* const evaluation_overflow_counter, double* const evaluation_loss_sum, std::uint8_t* const evaluation_pixels, std::uint8_t* const host_evaluation_pixels, double& out_loss_sum) {
         out_loss_sum = 0.0;
-        if (pixels == nullptr || camera == nullptr || intrinsics == nullptr || frame_indices == nullptr || field_to_world_linear == nullptr || occupancy == nullptr || params == nullptr || sample_coords == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr || evaluation_numsteps == nullptr || evaluation_sample_counter == nullptr || evaluation_overflow_counter == nullptr || evaluation_loss_sum == nullptr || evaluation_pixels == nullptr || host_evaluation_pixels == nullptr) throw std::runtime_error{"invalid evaluation image input."};
+        if (pixels == nullptr || camera == nullptr || intrinsics == nullptr || frame_indices == nullptr || field_to_world_linear == nullptr || params == nullptr || sample_coords == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr || evaluation_numsteps == nullptr || evaluation_sample_counter == nullptr || evaluation_overflow_counter == nullptr || evaluation_loss_sum == nullptr || evaluation_pixels == nullptr || host_evaluation_pixels == nullptr) throw std::runtime_error{"invalid evaluation image input."};
         if (view_count == 0u || time_count == 0u || view_index >= view_count || time_index >= time_count || width == 0u || height == 0u) throw std::runtime_error{"invalid evaluation image shape."};
         const std::uint32_t render_width     = width;
         const std::uint32_t render_height    = height;
@@ -973,7 +958,7 @@ namespace hyfluid::cuda {
             if (const cudaError_t status = cudaMemset(evaluation_sample_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset evaluation sample counter failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaMemset(evaluation_overflow_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset evaluation overflow counter failed: "} + cudaGetErrorString(status)};
 
-            generate_evaluation_samples_kernel<<<(tile_pixels + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(tile_pixels, pixel_offset, train::config::max_samples, render_width, view_index, time_index, time_count, camera, intrinsics, frame_indices, field_to_world_linear, occupancy, evaluation_sample_counter, evaluation_overflow_counter, evaluation_numsteps, sample_coords);
+            generate_evaluation_samples_kernel<<<(tile_pixels + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(tile_pixels, pixel_offset, train::config::max_samples, render_width, view_index, time_index, time_count, camera, intrinsics, frame_indices, field_to_world_linear, evaluation_sample_counter, evaluation_overflow_counter, evaluation_numsteps, sample_coords);
             if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"generate_evaluation_samples_kernel failed: "} + cudaGetErrorString(status)};
 
             std::uint32_t overflow_count = 0u;

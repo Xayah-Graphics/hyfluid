@@ -165,9 +165,9 @@ namespace hyfluid::cuda {
 
             if (steps == 1u) {
                 const float* ray = rays + static_cast<std::uint64_t>(i) * train::config::ray_floats;
-                segment.end[0u]  = segment.start_width[0u] + ray[5u] * train::config::min_cone_stepsize;
-                segment.end[1u]  = segment.start_width[1u] + ray[4u] * train::config::min_cone_stepsize;
-                segment.end[2u]  = segment.start_width[2u] + ray[3u] * train::config::min_cone_stepsize;
+                segment.end[0u]  = segment.start_width[0u] + ray[5u] * train::config::training_ray_stepsize;
+                segment.end[1u]  = segment.start_width[1u] + ray[4u] * train::config::training_ray_stepsize;
+                segment.end[2u]  = segment.start_width[2u] + ray[3u] * train::config::training_ray_stepsize;
             }
 
             const float time                = fminf(1.0f, fmaxf(0.0f, start[3u]));
@@ -219,7 +219,7 @@ namespace hyfluid::cuda {
             out_diagnostics.time_max                  = std::max(out_diagnostics.time_max, coord[3u]);
             out_diagnostics.dt_metric_min             = std::min(out_diagnostics.dt_metric_min, coord[4u]);
             out_diagnostics.dt_metric_max             = std::max(out_diagnostics.dt_metric_max, coord[4u]);
-            const float metric_per_field_unit         = coord[4u] / train::config::min_cone_stepsize;
+            const float metric_per_field_unit         = coord[4u] / train::config::training_ray_stepsize;
             out_diagnostics.metric_per_field_unit_min = std::min(out_diagnostics.metric_per_field_unit_min, metric_per_field_unit);
             out_diagnostics.metric_per_field_unit_max = std::max(out_diagnostics.metric_per_field_unit_max, metric_per_field_unit);
             dt_sum += static_cast<double>(coord[4u]);

@@ -11,6 +11,11 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t hash4_max_entries        = 1u << 19u;
     inline constexpr std::array hash4_resolutions           = {16u, 21u, 26u, 32u, 41u, 51u, 65u, 81u, 102u, 129u, 162u, 204u, 257u, 323u, 407u, 512u};
 
+    constexpr std::uint32_t ceil_to_uint(const float value) {
+        const auto truncated = static_cast<std::uint32_t>(value);
+        return static_cast<float>(truncated) == value ? truncated : truncated + 1u;
+    }
+
     inline constexpr std::uint32_t mlp_width            = 64u;
     inline constexpr std::uint32_t mlp_input_width      = hash4_output_width;
     inline constexpr std::uint32_t network_output_width = 1u;
@@ -20,17 +25,22 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t initial_rays_per_batch     = 1024u;
     inline constexpr std::uint32_t nerf_grid_size             = 128u;
     inline constexpr std::uint32_t nerf_grid_cells            = nerf_grid_size * nerf_grid_size * nerf_grid_size;
-    inline constexpr std::uint32_t nerf_steps                 = 192u;
+    inline constexpr float unit_aabb_diagonal                 = 1.73205080757f;
+    inline constexpr std::uint32_t training_ray_steps         = 192u;
+    inline constexpr std::uint32_t max_hash_resolution        = hash4_resolutions[hash4_level_count - 1u];
+    inline constexpr std::uint32_t evaluation_ray_step_factor = 2u;
+    inline constexpr std::uint32_t evaluation_ray_steps       = ceil_to_uint(unit_aabb_diagonal * static_cast<float>(max_hash_resolution * evaluation_ray_step_factor));
     inline constexpr std::uint32_t max_samples                = network_batch_size;
     inline constexpr std::uint32_t sample_coord_floats        = 5u;
     inline constexpr std::uint32_t ray_floats                 = 6u;
-    inline constexpr std::uint32_t evaluation_tile_pixels     = 1024u;
+    inline constexpr std::uint32_t evaluation_tile_pixels     = network_batch_size / evaluation_ray_steps;
     inline constexpr std::uint32_t threads_per_block          = 128u;
     inline constexpr std::uint32_t grid_forward_threads       = 256u;
     inline constexpr std::uint32_t grid_backward_threads      = 256u;
     inline constexpr std::uint32_t max_random_samples_per_ray = 16u;
     inline constexpr std::size_t cublaslt_workspace_bytes     = static_cast<std::size_t>(64u) * 1024u * 1024u;
-    inline constexpr float min_cone_stepsize                  = 1.73205080757f / static_cast<float>(nerf_steps);
+    inline constexpr float training_ray_stepsize              = unit_aabb_diagonal / static_cast<float>(training_ray_steps);
+    inline constexpr float evaluation_ray_stepsize            = unit_aabb_diagonal / static_cast<float>(evaluation_ray_steps);
     inline constexpr float transmittance_epsilon              = 1.0e-4f;
 
     inline constexpr float optimizer_learning_rate = 5.0e-4f;
@@ -120,8 +130,11 @@ namespace hyfluid::train::config {
     static_assert(network_batch_size % network_batch_granularity == 0u);
     static_assert(sample_coord_floats == 5u);
     static_assert(ray_floats == 6u);
+    static_assert(training_ray_steps != 0u);
+    static_assert(max_hash_resolution == 512u);
+    static_assert(evaluation_ray_steps == 1774u);
     static_assert(evaluation_tile_pixels != 0u);
-    static_assert(evaluation_tile_pixels * nerf_steps <= max_samples);
+    static_assert(evaluation_tile_pixels * evaluation_ray_steps <= max_samples);
     static_assert(max_samples != 0u);
     static_assert(max_samples == network_batch_size);
     static_assert(network_parameter_layout.hash4_offsets[0u] == 0u);
