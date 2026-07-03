@@ -293,22 +293,35 @@ namespace hyfluid::train {
             if (evaluation_pixel_capacity == 0ull || evaluation_pixel_capacity > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"evaluation render pixel capacity is invalid."};
             this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
 
-            cuda::upload_field_domain(field_to_world_linear.data(), this->device.field_to_world_linear);
-            cuda::allocate_sampler_buffers(this->host.occupancy_grid_bin_count, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_bin_counts);
-            cuda::allocate_density_grid_buffers(this->host.occupancy_grid_bin_count, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean);
-            cuda::allocate_training_loss_buffers(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients);
-            cuda::allocate_network_buffers(this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
-            cuda::allocate_trainable_parameter_buffers(this->device.params_full_precision, this->device.params, this->device.param_gradients);
+            // ====================================================================================================
+            // 2. ALLOCATE GPU BUFFERS
+            // ====================================================================================================
+            {
+                cuda::upload_field_domain(field_to_world_linear.data(), this->device.field_to_world_linear);
+                cuda::allocate_sampler_buffers(this->host.occupancy_grid_bin_count, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_bin_counts);
+                cuda::allocate_network_buffers(this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
+                cuda::allocate_density_grid_buffers(this->host.occupancy_grid_bin_count, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean);
+                cuda::allocate_training_loss_buffers(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients);
+                cuda::allocate_evaluation_buffers(this->host.evaluation_pixel_capacity, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
+                cuda::allocate_trainable_parameter_buffers(this->device.params_full_precision, this->device.params, this->device.param_gradients);
+                cuda::allocate_optimizer_buffers(this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
+            }
+
+            // ====================================================================================================
+            // 3. INITIALIZE TRAINING STATE
+            // ====================================================================================================
             cuda::initialize_trainable_parameters(this->device.params_full_precision, this->device.params);
-            cuda::allocate_optimizer_buffers(this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
-            cuda::allocate_evaluation_buffers(this->host.evaluation_pixel_capacity, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
-            cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_bin_counts, this->host.occupancy_grid_bin_count);
             this->host.current_step                            = 0u;
             this->host.rays_per_batch                          = config::initial_rays_per_batch;
             this->host.inference_sample_count                  = config::network_batch_size;
             this->host.measured_sample_count_before_compaction = 0u;
             this->host.measured_sample_count                   = 0u;
             this->host.density_grid_ema_step                   = 0u;
+
+            // ====================================================================================================
+            // 4. INITIALIZE CONSERVATIVE OCCUPANCY BANK
+            // ====================================================================================================
+            cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_bin_counts, this->host.occupancy_grid_bin_count);
             this->host.occupancy_grid_occupied_cells_by_bin.assign(this->host.occupancy_grid_bin_count, config::nerf_grid_cells);
         } catch (...) {
             cuda::destroy_network_handle(this->device.cublaslt_handle);

@@ -893,17 +893,13 @@ namespace hyfluid::cuda {
         if (occupancy_grid_bin_count == 0u) throw std::runtime_error{"occupancy grid bin count must be positive."};
         if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_bitfield_bytes) throw std::runtime_error{"occupancy grid temporal bank is too large."};
 
-        constexpr std::size_t sample_coord_bytes = static_cast<std::size_t>(train::config::max_samples) * train::config::sample_coord_floats * sizeof(float);
-        constexpr std::size_t ray_bytes          = static_cast<std::size_t>(train::config::network_batch_size) * train::config::ray_floats * sizeof(float);
-        constexpr std::size_t ray_index_bytes    = static_cast<std::size_t>(train::config::network_batch_size) * sizeof(std::uint32_t);
-        constexpr std::size_t numstep_bytes      = static_cast<std::size_t>(train::config::network_batch_size) * 2u * sizeof(std::uint32_t);
-        const std::size_t occupancy_bytes        = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
-        const std::size_t occupancy_count_bytes  = static_cast<std::size_t>(occupancy_grid_bin_count) * sizeof(std::uint32_t);
+        const std::size_t occupancy_bytes       = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
+        const std::size_t occupancy_count_bytes = static_cast<std::size_t>(occupancy_grid_bin_count) * sizeof(std::uint32_t);
 
-        if (const cudaError_t status = cudaMalloc(&out_sample_coords, sample_coord_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample coords failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_rays, ray_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler rays failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_ray_indices, ray_index_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler ray indices failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_numsteps, numstep_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler numsteps failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_sample_coords, static_cast<std::size_t>(train::config::max_samples) * train::config::sample_coord_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample coords failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_rays, static_cast<std::size_t>(train::config::network_batch_size) * train::config::ray_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler rays failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_ray_indices, static_cast<std::size_t>(train::config::network_batch_size) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler ray indices failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_numsteps, static_cast<std::size_t>(train::config::network_batch_size) * 2u * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler numsteps failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_ray_counter, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler ray counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_sample_counter, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_occupancy, occupancy_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy failed: "} + cudaGetErrorString(status)};
