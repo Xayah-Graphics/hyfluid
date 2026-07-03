@@ -150,6 +150,29 @@ namespace hyfluid::train {
                 if (frame_sets[i].name == name) return i;
             return std::nullopt;
         }
+
+        [[nodiscard]] std::uint32_t occupancy_grid_bank_cell_count(const std::uint32_t bin_count) {
+            if (bin_count == 0u || bin_count > std::numeric_limits<std::uint32_t>::max() / config::nerf_grid_cells) throw std::runtime_error{"occupancy grid temporal bank is too large."};
+            return bin_count * config::nerf_grid_cells;
+        }
+
+        [[nodiscard]] std::uint32_t density_grid_warmup_update_count(const std::uint32_t bin_count) {
+            if (bin_count == 0u || bin_count > std::numeric_limits<std::uint32_t>::max() / config::density_grid_warmup_passes) throw std::runtime_error{"density grid warmup update count is too large."};
+            return bin_count * config::density_grid_warmup_passes;
+        }
+
+        [[nodiscard]] std::uint32_t sum_occupancy_grid_bin_counts(const std::span<const std::uint32_t> counts) {
+            std::uint64_t total = 0ull;
+            for (const std::uint32_t count : counts) total += count;
+            if (total > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"occupancy grid occupied-cell count exceeds uint32."};
+            return static_cast<std::uint32_t>(total);
+        }
+
+        [[nodiscard]] std::uint32_t read_occupancy_grid_bank_counts(const std::uint32_t* const device_counts, std::vector<std::uint32_t>& host_counts) {
+            if (host_counts.empty()) throw std::runtime_error{"occupancy grid bin count is zero."};
+            cuda::read_occupancy_grid_bin_counts(device_counts, static_cast<std::uint32_t>(host_counts.size()), host_counts.data());
+            return sum_occupancy_grid_bin_counts(host_counts);
+        }
     } // namespace
 
     void HyFluid::initialize(const std::span<const FrameSetView> frame_sets, const std::span<const float> voxel_matrix, const std::span<const float> voxel_scale) {
@@ -180,9 +203,12 @@ namespace hyfluid::train {
             {
                 this->host.frame_sets.reserve(frame_sets.size());
                 this->device.frame_sets.reserve(frame_sets.size());
+                std::uint32_t occupancy_grid_bin_count = 0u;
                 for (const FrameSetView& frame_set : frame_sets) {
                     if (frame_set.name.empty()) throw std::runtime_error{"frame set name must not be empty."};
                     if (frame_set.view_count == 0u || frame_set.time_count == 0u) throw std::runtime_error{std::format("frame set '{}' must declare positive view_count and time_count.", frame_set.name)};
+                    if (occupancy_grid_bin_count == 0u) occupancy_grid_bin_count = frame_set.time_count;
+                    if (occupancy_grid_bin_count != frame_set.time_count) throw std::runtime_error{"all frame sets must share the same time_count for temporal occupancy grids."};
                     if (frame_set.frames.empty()) throw std::runtime_error{std::format("frame set '{}' contains no frames.", frame_set.name)};
                     if (frame_set.view_count > std::numeric_limits<std::uint32_t>::max() / frame_set.time_count) throw std::runtime_error{std::format("frame set '{}' view-time grid is too large.", frame_set.name)};
                     const std::uint32_t expected_frame_count = frame_set.view_count * frame_set.time_count;
@@ -257,8 +283,8 @@ namespace hyfluid::train {
                         .height     = first_frame.height,
                     });
                 }
+                this->host.occupancy_grid_bin_count = occupancy_grid_bin_count;
             }
-
             std::uint64_t evaluation_pixel_capacity = 0ull;
             for (const HostFrameSet& frame_set : this->host.frame_sets) {
                 const std::uint64_t render_pixels = static_cast<std::uint64_t>(frame_set.width) * frame_set.height;
@@ -268,23 +294,25 @@ namespace hyfluid::train {
             this->host.evaluation_pixel_capacity = static_cast<std::uint32_t>(evaluation_pixel_capacity);
 
             cuda::upload_field_domain(field_to_world_linear.data(), this->device.field_to_world_linear);
-            cuda::allocate_sampler_buffers(this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count);
+            cuda::allocate_sampler_buffers(this->host.occupancy_grid_bin_count, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_bin_counts);
+            cuda::allocate_density_grid_buffers(this->host.occupancy_grid_bin_count, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean);
             cuda::allocate_training_loss_buffers(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients);
             cuda::allocate_network_buffers(this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
             cuda::allocate_trainable_parameter_buffers(this->device.params_full_precision, this->device.params, this->device.param_gradients);
             cuda::initialize_trainable_parameters(this->device.params_full_precision, this->device.params);
             cuda::allocate_optimizer_buffers(this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps);
             cuda::allocate_evaluation_buffers(this->host.evaluation_pixel_capacity, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
-            cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_occupied_count);
+            cuda::set_occupancy_grid_full(this->device.occupancy, this->device.occupancy_grid_bin_counts, this->host.occupancy_grid_bin_count);
             this->host.current_step                            = 0u;
             this->host.rays_per_batch                          = config::initial_rays_per_batch;
             this->host.inference_sample_count                  = config::network_batch_size;
             this->host.measured_sample_count_before_compaction = 0u;
             this->host.measured_sample_count                   = 0u;
-            this->host.occupancy_grid_occupied_cells           = config::nerf_grid_cells;
+            this->host.density_grid_ema_step                   = 0u;
+            this->host.occupancy_grid_occupied_cells_by_bin.assign(this->host.occupancy_grid_bin_count, config::nerf_grid_cells);
         } catch (...) {
             cuda::destroy_network_handle(this->device.cublaslt_handle);
-            cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
+            cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_bin_counts, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
             for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.frame_indices);
             throw;
         }
@@ -292,7 +320,7 @@ namespace hyfluid::train {
 
     HyFluid::~HyFluid() noexcept {
         cuda::destroy_network_handle(this->device.cublaslt_handle);
-        cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_occupied_count, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
+        cuda::free_device_buffers(this->device.field_to_world_linear, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter, this->device.occupancy, this->device.occupancy_grid_bin_counts, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->device.density_grid_mean, this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.loss_values, this->device.network_output_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_workspace, this->device.params_full_precision, this->device.params, this->device.param_gradients, this->device.optimizer_first_moments, this->device.optimizer_second_moments, this->device.optimizer_param_steps, this->device.evaluation_numsteps, this->device.evaluation_sample_counter, this->device.evaluation_overflow_counter, this->device.evaluation_loss_sum, this->device.evaluation_pixels);
         for (DeviceFrameSet& frame_set : this->device.frame_sets) cuda::free_device_buffers(frame_set.pixels, frame_set.camera, frame_set.intrinsics, frame_set.frame_indices);
     }
 
@@ -309,12 +337,30 @@ namespace hyfluid::train {
             std::uint32_t ray_count              = 0u;
             std::uint32_t sample_count           = 0u;
             std::uint32_t compacted_sample_count = 0u;
-            std::uint32_t loss_value_count       = this->host.rays_per_batch;
+            std::uint32_t batch_rays_per_batch   = this->host.rays_per_batch;
+            std::uint32_t loss_value_count       = batch_rays_per_batch;
+            const std::uint32_t warmup_updates   = density_grid_warmup_update_count(this->host.occupancy_grid_bin_count);
+            const std::uint32_t bank_cell_count  = occupancy_grid_bank_cell_count(this->host.occupancy_grid_bin_count);
+            std::uint32_t updated_bin            = this->host.density_grid_ema_step == 0u ? 0u : (this->host.density_grid_ema_step - 1u) % this->host.occupancy_grid_bin_count;
+            std::uint32_t occupancy_grid_total_occupied_cells = 0u;
             for (std::int32_t i = 0; i < request.iterations; ++i) {
-                loss_value_count = this->host.rays_per_batch;
-                cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->host.current_step, this->host.rays_per_batch, this->host.inference_sample_count, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
+                batch_rays_per_batch            = this->host.rays_per_batch;
+                loss_value_count                = batch_rays_per_batch;
+                const bool was_warmup_complete  = this->host.density_grid_ema_step >= warmup_updates;
+                const bool density_updated      = cuda::update_density_grid_values(this->host.current_step, this->host.occupancy_grid_bin_count, this->device.params, this->device.sample_coords, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace, this->device.density_grid_values, this->device.density_grid_scratch, this->device.density_grid_indices, this->host.density_grid_ema_step, updated_bin);
+                const bool is_warmup_complete   = this->host.density_grid_ema_step >= warmup_updates;
+                if (density_updated && is_warmup_complete) {
+                    if (was_warmup_complete) {
+                        cuda::update_occupancy_grid_bin_from_density_grid(this->device.density_grid_values, this->device.density_grid_mean, this->device.occupancy_grid_bin_counts, this->device.occupancy, this->host.occupancy_grid_bin_count, updated_bin);
+                    } else {
+                        cuda::update_occupancy_grid_bank_from_density_grid(this->device.density_grid_values, this->device.density_grid_mean, this->device.occupancy_grid_bin_counts, this->device.occupancy, this->host.occupancy_grid_bin_count);
+                    }
+                    occupancy_grid_total_occupied_cells = read_occupancy_grid_bank_counts(this->device.occupancy_grid_bin_counts, this->host.occupancy_grid_occupied_cells_by_bin);
+                    if (occupancy_grid_total_occupied_cells == 0u) throw std::runtime_error{"density grid update produced an empty occupancy grid."};
+                }
+                cuda::sample_training_batch(device_frame_set->camera, device_frame_set->intrinsics, device_frame_set->frame_indices, this->device.field_to_world_linear, host_frame_set->view_count, host_frame_set->time_count, this->host.occupancy_grid_bin_count, host_frame_set->width, host_frame_set->height, this->host.current_step, batch_rays_per_batch, this->host.inference_sample_count, this->device.occupancy, this->device.sample_coords, this->device.rays, this->device.ray_indices, this->device.numsteps, this->device.ray_counter, this->device.sample_counter);
                 cuda::evaluate_network(this->host.inference_sample_count, this->device.sample_coords, this->device.params, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace);
-                cuda::compute_training_loss_and_compact_samples(this->host.rays_per_batch, this->host.current_step, this->device.ray_counter, device_frame_set->pixels, device_frame_set->frame_indices, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->device.network_output, this->device.compacted_sample_counter, this->device.ray_indices, this->device.numsteps, this->device.sample_coords, this->device.compacted_sample_coords, this->device.network_output_gradients, this->device.param_gradients, this->device.params, this->device.loss_values);
+                cuda::compute_training_loss_and_compact_samples(batch_rays_per_batch, this->host.current_step, this->device.ray_counter, device_frame_set->pixels, device_frame_set->frame_indices, host_frame_set->view_count, host_frame_set->time_count, host_frame_set->width, host_frame_set->height, this->device.network_output, this->device.compacted_sample_counter, this->device.ray_indices, this->device.numsteps, this->device.sample_coords, this->device.compacted_sample_coords, this->device.network_output_gradients, this->device.param_gradients, this->device.params, this->device.loss_values);
                 cuda::pad_compacted_training_batch(this->device.compacted_sample_counter, this->device.compacted_sample_coords, this->device.network_output_gradients);
                 cuda::forward_network(this->device.compacted_sample_coords, this->device.params, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.cublaslt_handle, this->device.cublaslt_workspace);
                 cuda::backward_network(this->device.compacted_sample_coords, this->device.params, this->device.param_gradients, this->device.network_input, this->device.network_hidden, this->device.network_output, this->device.network_output_gradients, this->device.network_input_gradients, this->device.network_hidden_gradients, this->device.cublaslt_handle, this->device.cublaslt_workspace);
@@ -330,24 +376,30 @@ namespace hyfluid::train {
                 this->host.inference_sample_count                  = ((std::min(sample_count, config::max_samples) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
                 if (this->host.inference_sample_count == 0u) this->host.inference_sample_count = config::network_batch_granularity;
                 if (this->host.inference_sample_count > config::network_batch_size) this->host.inference_sample_count = config::network_batch_size;
+                const std::uint64_t adjusted_rays = std::min((static_cast<std::uint64_t>(batch_rays_per_batch) * config::network_batch_size) / this->host.measured_sample_count, static_cast<std::uint64_t>(config::max_rays_per_batch));
+                const std::uint32_t rounded_rays  = ((static_cast<std::uint32_t>(adjusted_rays) + config::network_batch_granularity - 1u) / config::network_batch_granularity) * config::network_batch_granularity;
+                this->host.rays_per_batch         = std::min(std::max(rounded_rays, config::network_batch_granularity), config::max_rays_per_batch);
                 ++this->host.current_step;
             }
             float loss_sum = 0.0f;
             cuda::read_loss_sum(this->device.loss_values, loss_value_count, loss_sum);
-            cuda::read_counter(this->device.occupancy_grid_occupied_count, this->host.occupancy_grid_occupied_cells);
+            occupancy_grid_total_occupied_cells = read_occupancy_grid_bank_counts(this->device.occupancy_grid_bin_counts, this->host.occupancy_grid_occupied_cells_by_bin);
             const float psnr = loss_sum > 0.0f ? -10.0f * std::log10(loss_sum) : std::numeric_limits<float>::infinity();
             return OptimizationStats{
                 .step                           = this->host.current_step,
-                .rays_per_batch                 = this->host.rays_per_batch,
+                .rays_per_batch                 = batch_rays_per_batch,
+                .next_rays_per_batch            = this->host.rays_per_batch,
                 .ray_count                      = ray_count,
                 .sample_count_before_compaction = sample_count,
                 .sample_count                   = compacted_sample_count,
-                .occupancy_grid_occupied_cells  = this->host.occupancy_grid_occupied_cells,
+                .occupancy_grid_occupied_cells  = occupancy_grid_total_occupied_cells,
+                .occupancy_grid_updated_bin     = updated_bin,
+                .occupancy_grid_updated_bin_occupied_cells = this->host.occupancy_grid_occupied_cells_by_bin.at(updated_bin),
                 .loss                           = loss_sum,
                 .psnr                           = psnr,
                 .elapsed_ms                     = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - optimize_start).count(),
                 .sample_efficiency_ratio        = sample_count == 0u ? 0.0f : static_cast<float>(compacted_sample_count) / static_cast<float>(sample_count),
-                .occupancy_grid_ratio           = static_cast<float>(this->host.occupancy_grid_occupied_cells) / static_cast<float>(config::nerf_grid_cells),
+                .occupancy_grid_ratio           = static_cast<float>(occupancy_grid_total_occupied_cells) / static_cast<float>(bank_cell_count),
             };
         } catch (const std::exception& error) {
             return std::unexpected{std::string{error.what()}};

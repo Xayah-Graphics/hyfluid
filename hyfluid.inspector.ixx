@@ -46,6 +46,8 @@ namespace hyfluid::inspector {
 
     export struct OccupancyGridDeviceView final {
         std::array<std::uint32_t, 3u> dimensions{};
+        std::uint32_t bin_index = 0u;
+        std::uint32_t bin_count = 0u;
         std::uint64_t cell_count = 0u;
         const std::uint8_t* bitfield{};
         std::uint64_t bitfield_bytes = 0u;
@@ -90,7 +92,7 @@ namespace hyfluid::inspector {
         [[nodiscard]] TrainingBatchDiagnostics training_batch_diagnostics() const;
         [[nodiscard]] TrainingModelDiagnostics training_model_diagnostics() const;
         [[nodiscard]] SamplerBatchDeviceView sampler_batch_device_view() const;
-        [[nodiscard]] OccupancyGridDeviceView occupancy_grid_device_view() const;
+        [[nodiscard]] OccupancyGridDeviceView occupancy_grid_device_view(std::uint32_t bin_index) const;
         [[nodiscard]] std::expected<DensitySliceSampleStats, std::string> sample_density_slice(DensitySliceSampleRequest request) const;
         [[nodiscard]] std::expected<SamplerVisualizationStats, std::string> write_sampler_visualization(SamplerVisualizationRequest request) const;
 

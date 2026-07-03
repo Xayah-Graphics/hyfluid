@@ -309,7 +309,7 @@ int main(const int argc, const char* const* const argv) {
                 for (const std::pair<std::int32_t, float>& value : recent_psnr) recent_psnr_sum += static_cast<double>(value.first) * static_cast<double>(value.second);
                 const auto recent_psnr_mean = static_cast<float>(recent_psnr_sum / static_cast<double>(recent_psnr_steps));
 
-                std::println("density optimize: frame_set={} step={} loss={:.6g} psnr={:.3f} recent_psnr={:.3f} rays={}/{} samples={}/{} sample_eff={:.2f}% coord_min=[{:.4f},{:.4f},{:.4f}] coord_max=[{:.4f},{:.4f},{:.4f}] time=[{:.4f},{:.4f}] dt_metric=[{:.8f},{:.8f},{:.8f}] metric_per_field_unit=[{:.6f},{:.6f},{:.6f}] global_rgb=[param {:.6g}, color {:.6g}, grad {:.6g}] occupancy_cells={} occupancy_grid={:.2f}% elapsed={:.3f}ms",
+                std::println("density optimize: frame_set={} step={} loss={:.6g} psnr={:.3f} recent_psnr={:.3f} rays={}/{} next_rays={} samples={}/{} sample_eff={:.2f}% coord_min=[{:.4f},{:.4f},{:.4f}] coord_max=[{:.4f},{:.4f},{:.4f}] time=[{:.4f},{:.4f}] dt_metric=[{:.8f},{:.8f},{:.8f}] metric_per_field_unit=[{:.6f},{:.6f},{:.6f}] global_rgb=[param {:.6g}, color {:.6g}, grad {:.6g}] occupancy_cells={} occupancy_grid={:.2f}% updated_bin={} bin_cells={} elapsed={:.3f}ms",
                              optimize_frame_set_label,
                              stats.step,
                              stats.loss,
@@ -317,6 +317,7 @@ int main(const int argc, const char* const* const argv) {
                              recent_psnr_mean,
                              stats.ray_count,
                              stats.rays_per_batch,
+                             stats.next_rays_per_batch,
                              stats.sample_count,
                              stats.sample_count_before_compaction,
                              stats.sample_efficiency_ratio * 100.0f,
@@ -339,16 +340,19 @@ int main(const int argc, const char* const* const argv) {
                              model_diagnostics.global_rgb_gradient,
                              stats.occupancy_grid_occupied_cells,
                              stats.occupancy_grid_ratio * 100.0f,
+                             stats.occupancy_grid_updated_bin,
+                             stats.occupancy_grid_updated_bin_occupied_cells,
                              stats.elapsed_ms);
 
                 if (training_log) {
-                    training_log << std::format("{{\"step\":{},\"loss\":{:.9g},\"psnr\":{:.9g},\"recent_psnr\":{:.9g},\"ray_count\":{},\"rays_per_batch\":{},\"sample_count\":{},\"sample_count_before_compaction\":{},\"sample_efficiency_ratio\":{:.9g},\"coord_min\":[{:.9g},{:.9g},{:.9g}],\"coord_max\":[{:.9g},{:.9g},{:.9g}],\"time_min\":{:.9g},\"time_max\":{:.9g},\"dt_metric_min\":{:.9g},\"dt_metric_mean\":{:.9g},\"dt_metric_max\":{:.9g},\"metric_per_field_unit_min\":{:.9g},\"metric_per_field_unit_mean\":{:.9g},\"metric_per_field_unit_max\":{:.9g},\"global_rgb_param\":{:.9g},\"global_rgb_color\":{:.9g},\"global_rgb_gradient\":{:.9g},\"occupancy_grid_occupied_cells\":{},\"occupancy_grid_ratio\":{:.9g},\"elapsed_ms\":{:.9g}}}\n",
+                    training_log << std::format("{{\"step\":{},\"loss\":{:.9g},\"psnr\":{:.9g},\"recent_psnr\":{:.9g},\"ray_count\":{},\"rays_per_batch\":{},\"next_rays_per_batch\":{},\"sample_count\":{},\"sample_count_before_compaction\":{},\"sample_efficiency_ratio\":{:.9g},\"coord_min\":[{:.9g},{:.9g},{:.9g}],\"coord_max\":[{:.9g},{:.9g},{:.9g}],\"time_min\":{:.9g},\"time_max\":{:.9g},\"dt_metric_min\":{:.9g},\"dt_metric_mean\":{:.9g},\"dt_metric_max\":{:.9g},\"metric_per_field_unit_min\":{:.9g},\"metric_per_field_unit_mean\":{:.9g},\"metric_per_field_unit_max\":{:.9g},\"global_rgb_param\":{:.9g},\"global_rgb_color\":{:.9g},\"global_rgb_gradient\":{:.9g},\"occupancy_grid_occupied_cells\":{},\"occupancy_grid_ratio\":{:.9g},\"occupancy_grid_updated_bin\":{},\"occupancy_grid_updated_bin_occupied_cells\":{},\"elapsed_ms\":{:.9g}}}\n",
                                                 stats.step,
                                                 stats.loss,
                                                 stats.psnr,
                                                 recent_psnr_mean,
                                                 stats.ray_count,
                                                 stats.rays_per_batch,
+                                                stats.next_rays_per_batch,
                                                 stats.sample_count,
                                                 stats.sample_count_before_compaction,
                                                 stats.sample_efficiency_ratio,
@@ -371,6 +375,8 @@ int main(const int argc, const char* const* const argv) {
                                                 model_diagnostics.global_rgb_gradient,
                                                 stats.occupancy_grid_occupied_cells,
                                                 stats.occupancy_grid_ratio,
+                                                stats.occupancy_grid_updated_bin,
+                                                stats.occupancy_grid_updated_bin_occupied_cells,
                                                 stats.elapsed_ms);
                     training_log.flush();
                 }

@@ -188,7 +188,7 @@ namespace hyfluid::cuda {
             return norm3df(x, y, z);
         }
 
-        __device__ bool is_occupancy_grid_cell_occupied(const float3 pos, const std::uint8_t* occupancy) {
+        __device__ bool is_occupancy_grid_cell_occupied(const float3 pos, const std::uint8_t* occupancy, const std::uint32_t bin_index) {
             const int x = static_cast<int>(pos.x * static_cast<float>(train::config::nerf_grid_size));
             const int y = static_cast<int>(pos.y * static_cast<float>(train::config::nerf_grid_size));
             const int z = static_cast<int>(pos.z * static_cast<float>(train::config::nerf_grid_size));
@@ -209,7 +209,30 @@ namespace hyfluid::cuda {
             morton_z                  = (morton_z * 0x00000011u) & 0xC30C30C3u;
             morton_z                  = (morton_z * 0x00000005u) & 0x49249249u;
             const std::uint32_t index = morton_x | (morton_y << 1u) | (morton_z << 2u);
-            return (occupancy[index / 8u] & (1u << (index % 8u))) != 0u;
+            const std::uint64_t byte_index = static_cast<std::uint64_t>(bin_index) * train::config::nerf_grid_bitfield_bytes + index / 8u;
+            return (occupancy[byte_index] & (1u << (index % 8u))) != 0u;
+        }
+
+        __device__ bool is_temporal_occupancy_grid_cell_occupied(const float3 pos, const std::uint8_t* occupancy, const std::uint32_t floor_bin_index, const std::uint32_t ceil_bin_index) {
+            if (is_occupancy_grid_cell_occupied(pos, occupancy, floor_bin_index)) return true;
+            return ceil_bin_index != floor_bin_index && is_occupancy_grid_cell_occupied(pos, occupancy, ceil_bin_index);
+        }
+
+        __device__ std::uint32_t morton3_decode_axis(std::uint32_t value) {
+            value &= 0x49249249u;
+            value = (value | (value >> 2u)) & 0xC30C30C3u;
+            value = (value | (value >> 4u)) & 0x0F00F00Fu;
+            value = (value | (value >> 8u)) & 0xFF0000FFu;
+            value = (value | (value >> 16u)) & 0x0000FFFFu;
+            return value;
+        }
+
+        __device__ uint3 morton3_decode(const std::uint32_t index) {
+            return {
+                morton3_decode_axis(index >> 0u),
+                morton3_decode_axis(index >> 1u),
+                morton3_decode_axis(index >> 2u),
+            };
         }
 
         __device__ float advance_to_next_density_voxel(const float t, const float3 pos, const float3 direction, const float3 inv_direction, const float step_size) {
@@ -242,7 +265,81 @@ namespace hyfluid::cuda {
             out_ray_phase    = rng.next_float();
         }
 
-        __global__ void generate_training_samples_kernel(const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ ray_counter, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ ray_indices_out, float* __restrict__ rays_out, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
+        __global__ void generate_density_grid_samples_kernel(const std::uint32_t chunk_sample_count, const std::uint32_t total_sample_count, const std::uint32_t sample_offset, const std::uint32_t density_grid_ema_step, const std::uint32_t rng_phase, const float threshold, const float bin_time, const float* __restrict__ density_grid_values, float* __restrict__ sample_coords, std::uint32_t* __restrict__ density_grid_indices) {
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i >= chunk_sample_count) return;
+            const std::uint32_t global_i = sample_offset + i;
+
+            Pcg32 rng{train::config::train_seed};
+            rng.advance(((static_cast<std::uint64_t>(density_grid_ema_step) * 2ull + static_cast<std::uint64_t>(rng_phase) + 1ull) << 32u) + static_cast<std::uint64_t>(global_i) * train::config::random_values_per_thread);
+
+            std::uint32_t index = 0u;
+            for (std::uint32_t attempt = 0u; attempt < 10u; ++attempt) {
+                index = static_cast<std::uint32_t>(((static_cast<std::uint64_t>(global_i) + static_cast<std::uint64_t>(density_grid_ema_step) * total_sample_count) * 56924617ull + static_cast<std::uint64_t>(attempt) * 19349663ull + 96925573ull) % train::config::nerf_grid_cells);
+                if (density_grid_values[index] > threshold) break;
+            }
+
+            const uint3 cell = morton3_decode(index);
+            float* coord     = sample_coords + static_cast<std::uint64_t>(i) * train::config::sample_coord_floats;
+            coord[0u]        = (static_cast<float>(cell.x) + rng.next_float()) / static_cast<float>(train::config::nerf_grid_size);
+            coord[1u]        = (static_cast<float>(cell.y) + rng.next_float()) / static_cast<float>(train::config::nerf_grid_size);
+            coord[2u]        = (static_cast<float>(cell.z) + rng.next_float()) / static_cast<float>(train::config::nerf_grid_size);
+            coord[3u]        = bin_time;
+            coord[4u]        = 0.0f;
+            density_grid_indices[i] = index;
+        }
+
+        __global__ void splat_density_grid_samples_kernel(const std::uint32_t sample_count, const std::uint32_t* __restrict__ density_grid_indices, const __half* __restrict__ density_output, float* __restrict__ density_grid_scratch) {
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i >= sample_count) return;
+
+            const float sigma     = fmaxf(__half2float(density_output[i]), 0.0f);
+            const float thickness = sigma * train::config::training_ray_stepsize;
+            atomicMax(reinterpret_cast<unsigned int*>(density_grid_scratch + density_grid_indices[i]), __float_as_uint(thickness));
+        }
+
+        __global__ void update_density_grid_ema_kernel(const float* __restrict__ density_grid_scratch, float* __restrict__ density_grid_values) {
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i >= train::config::nerf_grid_cells) return;
+
+            const float previous   = density_grid_values[i];
+            const float importance = density_grid_scratch[i];
+            density_grid_values[i] = fmaxf(previous * train::config::density_grid_decay, importance);
+        }
+
+        __global__ void reduce_density_grid_mean_kernel(const float* __restrict__ density_grid_values, float* __restrict__ density_grid_mean) {
+            __shared__ float sums[1024];
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            float sum             = 0.0f;
+            if (i < train::config::nerf_grid_cells / 4u) {
+                const float4 values = reinterpret_cast<const float4*>(density_grid_values)[i];
+                sum                 = values.x + values.y + values.z + values.w;
+            }
+
+            sums[threadIdx.x] = sum;
+            __syncthreads();
+
+            for (std::uint32_t stride = blockDim.x / 2u; stride > 0u; stride >>= 1u) {
+                if (threadIdx.x < stride) sums[threadIdx.x] += sums[threadIdx.x + stride];
+                __syncthreads();
+            }
+
+            if (threadIdx.x == 0u) atomicAdd(density_grid_mean, sums[0] / static_cast<float>(train::config::nerf_grid_cells));
+        }
+
+        __global__ void build_density_grid_bitfield_kernel(const float* __restrict__ density_grid_values, const float* __restrict__ density_grid_mean, std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ out_bin_occupied_cells) {
+            const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i >= train::config::nerf_grid_bitfield_bytes) return;
+
+            std::uint8_t bits     = 0u;
+            const float threshold = fminf(train::config::nerf_min_optical_thickness, *density_grid_mean);
+            for (std::uint8_t j = 0u; j < 8u; ++j) bits |= density_grid_values[i * 8u + j] > threshold ? static_cast<std::uint8_t>(1u << j) : 0u;
+            occupancy[i]                 = bits;
+            const std::uint32_t occupied = __popc(static_cast<std::uint32_t>(bits));
+            if (occupied != 0u) atomicAdd(out_bin_occupied_cells, occupied);
+        }
+
+        __global__ void generate_training_samples_kernel(const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint32_t current_step, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t occupancy_grid_bin_count, const std::uint32_t width, const std::uint32_t height, const float* __restrict__ camera, const float* __restrict__ intrinsics, const std::uint32_t* __restrict__ frame_indices, const float* __restrict__ field_to_world_linear, const std::uint8_t* __restrict__ occupancy, std::uint32_t* __restrict__ ray_counter, std::uint32_t* __restrict__ sample_counter, std::uint32_t* __restrict__ ray_indices_out, float* __restrict__ rays_out, std::uint32_t* __restrict__ numsteps_out, float* __restrict__ coords_out) {
             const std::uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i >= rays_per_batch) return;
 
@@ -254,6 +351,7 @@ namespace hyfluid::cuda {
             std::uint32_t pixel_y          = 0u;
             float ray_phase                = 0.0f;
             replay_training_ray_rng(i, current_step, view_count, time_count, width, height, view_index, floor_time_index, ceil_time_index, time_residual, pixel_x, pixel_y, ray_phase);
+            if (floor_time_index >= occupancy_grid_bin_count || ceil_time_index >= occupancy_grid_bin_count) return;
 
             const auto max_time_index             = static_cast<float>(time_count - 1u);
             const float normalized_time           = time_count == 1u ? 0.0f : (static_cast<float>(floor_time_index) + time_residual) / max_time_index;
@@ -311,7 +409,7 @@ namespace hyfluid::cuda {
             while (numsteps < train::config::training_ray_steps && t <= tmax) {
                 pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
                 if (!unit_aabb_contains(pos)) break;
-                if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
+                if (is_temporal_occupancy_grid_cell_occupied(pos, occupancy, floor_time_index, ceil_time_index)) {
                     ++numsteps;
                     t += dt;
                 } else {
@@ -334,7 +432,7 @@ namespace hyfluid::cuda {
             while (j < stored_numsteps && t <= tmax) {
                 pos = {ray_origin.x + ray_direction_normalized.x * t, ray_origin.y + ray_direction_normalized.y * t, ray_origin.z + ray_direction_normalized.z * t};
                 if (!unit_aabb_contains(pos)) break;
-                if (is_occupancy_grid_cell_occupied(pos, occupancy)) {
+                if (is_temporal_occupancy_grid_cell_occupied(pos, occupancy, floor_time_index, ceil_time_index)) {
                     float* coord = coords_out + static_cast<std::uint64_t>(base + j) * train::config::sample_coord_floats;
                     coord[0u]    = pos.x;
                     coord[1u]    = pos.y;
@@ -783,21 +881,24 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaMemcpy(out_field_to_world_linear, field_to_world_linear, 9u * sizeof(float), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy field_to_world_linear failed: "} + cudaGetErrorString(status)};
     }
 
-    void allocate_sampler_buffers(float*& out_sample_coords, float*& out_rays, std::uint32_t*& out_ray_indices, std::uint32_t*& out_numsteps, std::uint32_t*& out_ray_counter, std::uint32_t*& out_sample_counter, std::uint8_t*& out_occupancy, std::uint32_t*& out_occupancy_grid_occupied_count) {
-        out_sample_coords                 = nullptr;
-        out_rays                          = nullptr;
-        out_ray_indices                   = nullptr;
-        out_numsteps                      = nullptr;
-        out_ray_counter                   = nullptr;
-        out_sample_counter                = nullptr;
-        out_occupancy                     = nullptr;
-        out_occupancy_grid_occupied_count = nullptr;
+    void allocate_sampler_buffers(const std::uint32_t occupancy_grid_bin_count, float*& out_sample_coords, float*& out_rays, std::uint32_t*& out_ray_indices, std::uint32_t*& out_numsteps, std::uint32_t*& out_ray_counter, std::uint32_t*& out_sample_counter, std::uint8_t*& out_occupancy, std::uint32_t*& out_occupancy_grid_bin_counts) {
+        out_sample_coords              = nullptr;
+        out_rays                       = nullptr;
+        out_ray_indices                = nullptr;
+        out_numsteps                   = nullptr;
+        out_ray_counter                = nullptr;
+        out_sample_counter             = nullptr;
+        out_occupancy                  = nullptr;
+        out_occupancy_grid_bin_counts  = nullptr;
+        if (occupancy_grid_bin_count == 0u) throw std::runtime_error{"occupancy grid bin count must be positive."};
+        if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_bitfield_bytes) throw std::runtime_error{"occupancy grid temporal bank is too large."};
 
         constexpr std::size_t sample_coord_bytes = static_cast<std::size_t>(train::config::max_samples) * train::config::sample_coord_floats * sizeof(float);
-        constexpr std::size_t ray_bytes          = static_cast<std::size_t>(train::config::initial_rays_per_batch) * train::config::ray_floats * sizeof(float);
-        constexpr std::size_t ray_index_bytes    = static_cast<std::size_t>(train::config::initial_rays_per_batch) * sizeof(std::uint32_t);
-        constexpr std::size_t numstep_bytes      = static_cast<std::size_t>(train::config::initial_rays_per_batch) * 2u * sizeof(std::uint32_t);
-        constexpr std::size_t occupancy_bytes    = train::config::nerf_grid_cells / 8u;
+        constexpr std::size_t ray_bytes          = static_cast<std::size_t>(train::config::network_batch_size) * train::config::ray_floats * sizeof(float);
+        constexpr std::size_t ray_index_bytes    = static_cast<std::size_t>(train::config::network_batch_size) * sizeof(std::uint32_t);
+        constexpr std::size_t numstep_bytes      = static_cast<std::size_t>(train::config::network_batch_size) * 2u * sizeof(std::uint32_t);
+        const std::size_t occupancy_bytes        = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
+        const std::size_t occupancy_count_bytes  = static_cast<std::size_t>(occupancy_grid_bin_count) * sizeof(std::uint32_t);
 
         if (const cudaError_t status = cudaMalloc(&out_sample_coords, sample_coord_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample coords failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_rays, ray_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler rays failed: "} + cudaGetErrorString(status)};
@@ -806,24 +907,44 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaMalloc(&out_ray_counter, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler ray counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_sample_counter, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_occupancy, occupancy_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_occupancy_grid_occupied_count, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy grid occupied count failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_occupancy_grid_bin_counts, occupancy_count_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc occupancy grid bin counts failed: "} + cudaGetErrorString(status)};
     }
 
-    void set_occupancy_grid_full(std::uint8_t* const occupancy, std::uint32_t* const occupancy_grid_occupied_count) {
-        if (occupancy == nullptr || occupancy_grid_occupied_count == nullptr) throw std::runtime_error{"invalid occupancy grid full update input."};
-        constexpr std::size_t occupancy_bytes = train::config::nerf_grid_cells / 8u;
+    void set_occupancy_grid_full(std::uint8_t* const occupancy, std::uint32_t* const occupancy_grid_bin_counts, const std::uint32_t occupancy_grid_bin_count) {
+        if (occupancy == nullptr || occupancy_grid_bin_counts == nullptr || occupancy_grid_bin_count == 0u) throw std::runtime_error{"invalid occupancy grid full update input."};
+        if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_bitfield_bytes) throw std::runtime_error{"occupancy grid temporal bank is too large."};
+        const std::size_t occupancy_bytes = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
         if (const cudaError_t status = cudaMemset(occupancy, 0xFF, occupancy_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset full occupancy failed: "} + cudaGetErrorString(status)};
-        constexpr std::uint32_t occupied_count = train::config::nerf_grid_cells;
-        if (const cudaError_t status = cudaMemcpy(occupancy_grid_occupied_count, &occupied_count, sizeof(std::uint32_t), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy full occupancy count failed: "} + cudaGetErrorString(status)};
+        std::vector<std::uint32_t> full_counts(occupancy_grid_bin_count, train::config::nerf_grid_cells);
+        if (const cudaError_t status = cudaMemcpy(occupancy_grid_bin_counts, full_counts.data(), full_counts.size() * sizeof(std::uint32_t), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy full occupancy bin counts failed: "} + cudaGetErrorString(status)};
     }
 
-    void sample_training_batch(const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t current_step, const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint8_t* const occupancy, float* const sample_coords, float* const rays, std::uint32_t* const ray_indices, std::uint32_t* const numsteps, std::uint32_t* const ray_counter, std::uint32_t* const sample_counter) {
+    void allocate_density_grid_buffers(const std::uint32_t occupancy_grid_bin_count, float*& out_density_grid_values, float*& out_density_grid_scratch, std::uint32_t*& out_density_grid_indices, float*& out_density_grid_mean) {
+        out_density_grid_values  = nullptr;
+        out_density_grid_scratch = nullptr;
+        out_density_grid_indices = nullptr;
+        out_density_grid_mean    = nullptr;
+        if (occupancy_grid_bin_count == 0u) throw std::runtime_error{"occupancy grid bin count must be positive."};
+        if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_cells / sizeof(float)) throw std::runtime_error{"density grid temporal bank is too large."};
+        const std::size_t density_grid_value_bytes = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_cells * sizeof(float);
+
+        if (const cudaError_t status = cudaMalloc(&out_density_grid_values, density_grid_value_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density grid values failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_density_grid_scratch, static_cast<std::size_t>(train::config::nerf_grid_cells) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density grid scratch failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_density_grid_indices, static_cast<std::size_t>(train::config::max_samples) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density grid indices failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_density_grid_mean, sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc density grid mean failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(out_density_grid_values, 0, density_grid_value_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid values failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(out_density_grid_scratch, 0, static_cast<std::size_t>(train::config::nerf_grid_cells) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid scratch failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(out_density_grid_mean, 0, sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid mean failed: "} + cudaGetErrorString(status)};
+    }
+
+    void sample_training_batch(const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t occupancy_grid_bin_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t current_step, const std::uint32_t rays_per_batch, const std::uint32_t sample_limit, const std::uint8_t* const occupancy, float* const sample_coords, float* const rays, std::uint32_t* const ray_indices, std::uint32_t* const numsteps, std::uint32_t* const ray_counter, std::uint32_t* const sample_counter) {
         if (camera == nullptr || intrinsics == nullptr || frame_indices == nullptr || field_to_world_linear == nullptr || occupancy == nullptr || sample_coords == nullptr || rays == nullptr || ray_indices == nullptr || numsteps == nullptr || ray_counter == nullptr || sample_counter == nullptr) throw std::runtime_error{"invalid training sampler input."};
-        if (view_count == 0u || time_count == 0u || view_count > std::numeric_limits<std::uint32_t>::max() / time_count || width == 0u || height == 0u || rays_per_batch == 0u || rays_per_batch > train::config::initial_rays_per_batch || sample_limit == 0u || sample_limit > train::config::max_samples) throw std::runtime_error{"invalid training sampler shape."};
+        if (view_count == 0u || time_count == 0u || view_count > std::numeric_limits<std::uint32_t>::max() / time_count || width == 0u || height == 0u || rays_per_batch == 0u || rays_per_batch > train::config::max_rays_per_batch || sample_limit == 0u || sample_limit > train::config::max_samples) throw std::runtime_error{"invalid training sampler shape."};
+        if (time_count != occupancy_grid_bin_count) throw std::runtime_error{"training sampler time_count must match occupancy grid bin count."};
         if (const cudaError_t status = cudaMemset(ray_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset sampler ray counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMemset(sample_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset sampler sample counter failed: "} + cudaGetErrorString(status)};
         const std::uint32_t blocks = (rays_per_batch + train::config::threads_per_block - 1u) / train::config::threads_per_block;
-        generate_training_samples_kernel<<<blocks, train::config::threads_per_block>>>(rays_per_batch, sample_limit, current_step, view_count, time_count, width, height, camera, intrinsics, frame_indices, field_to_world_linear, occupancy, ray_counter, sample_counter, ray_indices, rays, numsteps, sample_coords);
+        generate_training_samples_kernel<<<blocks, train::config::threads_per_block>>>(rays_per_batch, sample_limit, current_step, view_count, time_count, occupancy_grid_bin_count, width, height, camera, intrinsics, frame_indices, field_to_world_linear, occupancy, ray_counter, sample_counter, ray_indices, rays, numsteps, sample_coords);
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"generate_training_samples_kernel failed: "} + cudaGetErrorString(status)};
     }
 
@@ -834,7 +955,7 @@ namespace hyfluid::cuda {
         out_network_output_gradients = nullptr;
         if (const cudaError_t status = cudaMalloc(&out_compacted_sample_counter, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc compacted sample counter failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_compacted_sample_coords, static_cast<std::size_t>(train::config::network_batch_size) * train::config::sample_coord_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc compacted sample coords failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_loss_values, static_cast<std::size_t>(train::config::initial_rays_per_batch) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc loss values failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_loss_values, static_cast<std::size_t>(train::config::network_batch_size) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc loss values failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_network_output_gradients, static_cast<std::size_t>(train::config::network_batch_size) * train::config::network_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network output gradients failed: "} + cudaGetErrorString(status)};
     }
 
@@ -938,6 +1059,75 @@ namespace hyfluid::cuda {
         cublaslt_matmul_row_major(cublaslt, CUBLAS_OP_N, CUBLAS_OP_T, CUDA_R_16F, CUDA_R_16F, CUDA_R_16F, network_hidden, static_cast<int>(sample_count), train::config::mlp_width, params + train::config::network_parameter_layout.mlp_output_weight_offset, train::config::network_output_width, train::config::mlp_width, network_output, static_cast<int>(sample_count), train::config::network_output_width, 1.0f, 0.0f, cublaslt_workspace);
         relu_half_kernel<<<(sample_count + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(sample_count, reinterpret_cast<__half*>(network_output));
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"relu output failed: "} + cudaGetErrorString(status)};
+    }
+
+    bool update_density_grid_values(const std::uint32_t current_step, const std::uint32_t occupancy_grid_bin_count, const std::uint16_t* const params, float* const sample_coords, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace, float* const density_grid_values, float* const density_grid_scratch, std::uint32_t* const density_grid_indices, std::uint32_t& density_grid_ema_step, std::uint32_t& out_updated_bin) {
+        if (occupancy_grid_bin_count == 0u) throw std::runtime_error{"occupancy grid bin count must be positive."};
+        if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_cells / sizeof(float)) throw std::runtime_error{"density grid temporal bank is too large."};
+        std::uint32_t density_grid_skip = current_step / train::config::density_grid_skip_interval;
+        if (density_grid_skip == 0u) density_grid_skip = 1u;
+        if (density_grid_skip > train::config::density_grid_max_skip) density_grid_skip = train::config::density_grid_max_skip;
+        if (density_grid_ema_step != 0u && current_step % density_grid_skip != 0u) return false;
+        if (params == nullptr || sample_coords == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr || density_grid_values == nullptr || density_grid_scratch == nullptr || density_grid_indices == nullptr) throw std::runtime_error{"invalid density grid update input."};
+
+        if (occupancy_grid_bin_count > std::numeric_limits<std::uint32_t>::max() / train::config::density_grid_warmup_passes) throw std::runtime_error{"density grid warmup update count is too large."};
+        out_updated_bin                             = density_grid_ema_step % occupancy_grid_bin_count;
+        const float bin_time                        = occupancy_grid_bin_count == 1u ? 0.0f : static_cast<float>(out_updated_bin) / static_cast<float>(occupancy_grid_bin_count - 1u);
+        float* const bin_density_grid_values        = density_grid_values + static_cast<std::uint64_t>(out_updated_bin) * train::config::nerf_grid_cells;
+        const std::uint32_t warmup_updates          = occupancy_grid_bin_count * train::config::density_grid_warmup_passes;
+        const bool density_grid_warmup              = density_grid_ema_step < warmup_updates;
+        const std::uint32_t uniform_sample_count    = density_grid_warmup ? train::config::density_grid_warmup_samples : train::config::density_grid_steady_uniform_samples;
+        const std::uint32_t nonuniform_sample_count = density_grid_warmup ? 0u : train::config::density_grid_steady_nonuniform_samples;
+        if (uniform_sample_count == 0u || uniform_sample_count > train::config::nerf_grid_cells || nonuniform_sample_count > train::config::nerf_grid_cells) throw std::runtime_error{"invalid density grid sample count."};
+
+        if (density_grid_ema_step == 0u) {
+            const cudaError_t status = cudaMemset(density_grid_values, static_cast<int>(0), static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_cells * sizeof(float));
+            if (status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid values failed: "} + cudaGetErrorString(status)};
+        }
+        if (const cudaError_t status = cudaMemset(density_grid_scratch, 0, static_cast<std::size_t>(train::config::nerf_grid_cells) * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid scratch failed: "} + cudaGetErrorString(status)};
+
+        const auto accumulate_density_samples = [&](const std::uint32_t total_sample_count, const std::uint32_t rng_phase, const float threshold, const char* const label) {
+            for (std::uint32_t sample_offset = 0u; sample_offset < total_sample_count; sample_offset += train::config::network_batch_size) {
+                const std::uint32_t chunk_sample_count = std::min(train::config::network_batch_size, total_sample_count - sample_offset);
+                generate_density_grid_samples_kernel<<<(chunk_sample_count + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(chunk_sample_count, total_sample_count, sample_offset, density_grid_ema_step, rng_phase, threshold, bin_time, bin_density_grid_values, sample_coords, density_grid_indices);
+                if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"generate "} + label + " density grid samples failed: " + cudaGetErrorString(status)};
+                evaluate_network(chunk_sample_count, sample_coords, params, network_input, network_hidden, network_output, cublaslt_handle, cublaslt_workspace);
+                splat_density_grid_samples_kernel<<<(chunk_sample_count + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(chunk_sample_count, density_grid_indices, reinterpret_cast<const __half*>(network_output), density_grid_scratch);
+                if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"splat "} + label + " density grid samples failed: " + cudaGetErrorString(status)};
+            }
+        };
+
+        accumulate_density_samples(uniform_sample_count, 0u, -0.01f, "uniform");
+        if (nonuniform_sample_count != 0u) accumulate_density_samples(nonuniform_sample_count, 1u, train::config::nerf_min_optical_thickness, "nonuniform");
+        update_density_grid_ema_kernel<<<(train::config::nerf_grid_cells + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(density_grid_scratch, bin_density_grid_values);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"update_density_grid_ema_kernel failed: "} + cudaGetErrorString(status)};
+        ++density_grid_ema_step;
+        return true;
+    }
+
+    void update_occupancy_grid_bin_from_density_grid(const float* const density_grid_values, float* const density_grid_mean, std::uint32_t* const occupancy_grid_bin_counts, std::uint8_t* const occupancy, const std::uint32_t occupancy_grid_bin_count, const std::uint32_t bin_index) {
+        if (density_grid_values == nullptr || density_grid_mean == nullptr || occupancy_grid_bin_counts == nullptr || occupancy == nullptr || occupancy_grid_bin_count == 0u || bin_index >= occupancy_grid_bin_count) throw std::runtime_error{"invalid occupancy grid update input."};
+        const float* const bin_density_grid_values = density_grid_values + static_cast<std::uint64_t>(bin_index) * train::config::nerf_grid_cells;
+        std::uint8_t* const bin_occupancy          = occupancy + static_cast<std::uint64_t>(bin_index) * train::config::nerf_grid_bitfield_bytes;
+        std::uint32_t* const bin_count             = occupancy_grid_bin_counts + bin_index;
+        if (const cudaError_t status = cudaMemset(density_grid_mean, 0, sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset density grid mean failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemset(bin_count, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset occupancy grid bin count failed: "} + cudaGetErrorString(status)};
+
+        reduce_density_grid_mean_kernel<<<(train::config::nerf_grid_cells / 4u + 1023u) / 1024u, 1024u>>>(bin_density_grid_values, density_grid_mean);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"reduce_density_grid_mean_kernel failed: "} + cudaGetErrorString(status)};
+        build_density_grid_bitfield_kernel<<<(train::config::nerf_grid_bitfield_bytes + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(bin_density_grid_values, density_grid_mean, bin_occupancy, bin_count);
+        if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"build_density_grid_bitfield_kernel failed: "} + cudaGetErrorString(status)};
+    }
+
+    void update_occupancy_grid_bank_from_density_grid(const float* const density_grid_values, float* const density_grid_mean, std::uint32_t* const occupancy_grid_bin_counts, std::uint8_t* const occupancy, const std::uint32_t occupancy_grid_bin_count) {
+        if (occupancy_grid_bin_count == 0u) throw std::runtime_error{"occupancy grid bin count must be positive."};
+        for (std::uint32_t bin_index = 0u; bin_index < occupancy_grid_bin_count; ++bin_index) update_occupancy_grid_bin_from_density_grid(density_grid_values, density_grid_mean, occupancy_grid_bin_counts, occupancy, occupancy_grid_bin_count, bin_index);
+    }
+
+    void read_occupancy_grid_bin_counts(const std::uint32_t* const occupancy_grid_bin_counts, const std::uint32_t occupancy_grid_bin_count, std::uint32_t* const host_counts) {
+        if (occupancy_grid_bin_counts == nullptr || host_counts == nullptr || occupancy_grid_bin_count == 0u) throw std::runtime_error{"invalid occupancy grid bin count readback input."};
+        const std::size_t byte_count = static_cast<std::size_t>(occupancy_grid_bin_count) * sizeof(std::uint32_t);
+        if (const cudaError_t status = cudaMemcpy(host_counts, occupancy_grid_bin_counts, byte_count, cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy occupancy grid bin counts failed: "} + cudaGetErrorString(status)};
     }
 
     void run_evaluation_image(const std::uint8_t* const pixels, const float* const camera, const float* const intrinsics, const std::uint32_t* const frame_indices, const float* const field_to_world_linear, const std::uint32_t view_count, const std::uint32_t time_count, const std::uint32_t width, const std::uint32_t height, const std::uint32_t view_index, const std::uint32_t time_index, const std::uint32_t render_pixel_capacity, const std::uint16_t* const params, float* const sample_coords, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace, std::uint32_t* const evaluation_numsteps, std::uint32_t* const evaluation_sample_counter, std::uint32_t* const evaluation_overflow_counter, double* const evaluation_loss_sum, std::uint8_t* const evaluation_pixels, std::uint8_t* const host_evaluation_pixels, double& out_loss_sum) {

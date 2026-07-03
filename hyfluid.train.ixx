@@ -50,10 +50,13 @@ namespace hyfluid::train {
     export struct OptimizationStats final {
         std::uint32_t step                           = 0u;
         std::uint32_t rays_per_batch                 = 0u;
+        std::uint32_t next_rays_per_batch            = 0u;
         std::uint32_t ray_count                      = 0u;
         std::uint32_t sample_count_before_compaction = 0u;
         std::uint32_t sample_count                   = 0u;
         std::uint32_t occupancy_grid_occupied_cells  = 0u;
+        std::uint32_t occupancy_grid_updated_bin     = 0u;
+        std::uint32_t occupancy_grid_updated_bin_occupied_cells = 0u;
         float loss                                   = 0.0f;
         float psnr                                   = 0.0f;
         float elapsed_ms                             = 0.0f;
@@ -163,7 +166,9 @@ namespace hyfluid::train {
             std::uint32_t evaluation_pixel_capacity               = 0u;
             std::uint32_t measured_sample_count_before_compaction = 0u;
             std::uint32_t measured_sample_count                   = 0u;
-            std::uint32_t occupancy_grid_occupied_cells           = 0u;
+            std::uint32_t density_grid_ema_step                   = 0u;
+            std::uint32_t occupancy_grid_bin_count                = 0u;
+            std::vector<std::uint32_t> occupancy_grid_occupied_cells_by_bin = {};
         } host;
 
         struct DeviceFrameSet final {
@@ -186,7 +191,11 @@ namespace hyfluid::train {
             std::uint32_t* numsteps                      = nullptr;
             std::uint32_t* ray_counter                   = nullptr;
             std::uint32_t* sample_counter                = nullptr;
-            std::uint32_t* occupancy_grid_occupied_count = nullptr;
+            std::uint32_t* occupancy_grid_bin_counts     = nullptr;
+            float* density_grid_values                   = nullptr;
+            float* density_grid_scratch                  = nullptr;
+            std::uint32_t* density_grid_indices          = nullptr;
+            float* density_grid_mean                     = nullptr;
 
             // Loss and compaction.
             std::uint32_t* compacted_sample_counter = nullptr;

@@ -44,14 +44,22 @@ namespace hyfluid::inspector {
         };
     }
 
-    OccupancyGridDeviceView Inspector::occupancy_grid_device_view() const {
+    OccupancyGridDeviceView Inspector::occupancy_grid_device_view(const std::uint32_t bin_index) const {
+        const std::uint32_t bin_count = this->trainer->host.occupancy_grid_bin_count;
+        if (bin_count == 0u) throw std::runtime_error{"HyFluid occupancy grid bin count is zero."};
+        if (bin_index >= bin_count) throw std::runtime_error{"HyFluid occupancy grid bin index is outside bin count."};
+        if (this->trainer->host.occupancy_grid_occupied_cells_by_bin.size() != bin_count) throw std::runtime_error{"HyFluid occupancy grid host bin counts are not initialized."};
+        constexpr std::uint64_t bitfield_bytes = train::config::nerf_grid_bitfield_bytes;
+        const std::uint8_t* const bitfield     = this->trainer->device.occupancy == nullptr ? nullptr : this->trainer->device.occupancy + static_cast<std::uint64_t>(bin_index) * bitfield_bytes;
         return OccupancyGridDeviceView{
-            .dimensions     = {train::config::nerf_grid_size, train::config::nerf_grid_size, train::config::nerf_grid_size},
-            .cell_count     = train::config::nerf_grid_cells,
-            .bitfield       = this->trainer->device.occupancy,
-            .bitfield_bytes = train::config::nerf_grid_cells / 8u,
-            .occupied_cells = this->trainer->host.occupancy_grid_occupied_cells,
-            .initialized    = this->trainer->device.occupancy != nullptr,
+            .dimensions             = {train::config::nerf_grid_size, train::config::nerf_grid_size, train::config::nerf_grid_size},
+            .bin_index              = bin_index,
+            .bin_count              = bin_count,
+            .cell_count             = train::config::nerf_grid_cells,
+            .bitfield               = bitfield,
+            .bitfield_bytes         = bitfield_bytes,
+            .occupied_cells         = this->trainer->host.occupancy_grid_occupied_cells_by_bin.at(bin_index),
+            .initialized            = this->trainer->device.occupancy != nullptr,
         };
     }
 

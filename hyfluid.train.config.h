@@ -25,12 +25,15 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t initial_rays_per_batch     = 1024u;
     inline constexpr std::uint32_t nerf_grid_size             = 128u;
     inline constexpr std::uint32_t nerf_grid_cells            = nerf_grid_size * nerf_grid_size * nerf_grid_size;
+    inline constexpr std::uint32_t nerf_grid_bitfield_bytes   = nerf_grid_cells / 8u;
+    inline constexpr float nerf_min_optical_thickness         = 0.01f;
     inline constexpr float unit_aabb_diagonal                 = 1.73205080757f;
     inline constexpr std::uint32_t training_ray_steps         = 192u;
     inline constexpr std::uint32_t max_hash_resolution        = hash4_resolutions[hash4_level_count - 1u];
     inline constexpr std::uint32_t evaluation_ray_step_factor = 2u;
     inline constexpr std::uint32_t evaluation_ray_steps       = ceil_to_uint(unit_aabb_diagonal * static_cast<float>(max_hash_resolution * evaluation_ray_step_factor));
     inline constexpr std::uint32_t max_samples                = network_batch_size;
+    inline constexpr std::uint32_t max_rays_per_batch         = (network_batch_size / training_ray_steps / network_batch_granularity) * network_batch_granularity;
     inline constexpr std::uint32_t sample_coord_floats        = 5u;
     inline constexpr std::uint32_t ray_floats                 = 6u;
     inline constexpr std::uint32_t evaluation_tile_pixels     = network_batch_size / evaluation_ray_steps;
@@ -38,10 +41,19 @@ namespace hyfluid::train::config {
     inline constexpr std::uint32_t grid_forward_threads       = 256u;
     inline constexpr std::uint32_t grid_backward_threads      = 256u;
     inline constexpr std::uint32_t max_random_samples_per_ray = 16u;
+    inline constexpr std::uint32_t random_values_per_thread   = 4u;
     inline constexpr std::size_t cublaslt_workspace_bytes     = static_cast<std::size_t>(64u) * 1024u * 1024u;
     inline constexpr float training_ray_stepsize              = unit_aabb_diagonal / static_cast<float>(training_ray_steps);
     inline constexpr float evaluation_ray_stepsize            = unit_aabb_diagonal / static_cast<float>(evaluation_ray_steps);
     inline constexpr float transmittance_epsilon              = 1.0e-4f;
+
+    inline constexpr std::uint32_t density_grid_warmup_passes              = 2u;
+    inline constexpr std::uint32_t density_grid_skip_interval              = 16u;
+    inline constexpr std::uint32_t density_grid_max_skip                   = 16u;
+    inline constexpr std::uint32_t density_grid_warmup_samples             = nerf_grid_cells;
+    inline constexpr std::uint32_t density_grid_steady_uniform_samples     = nerf_grid_cells / 16u;
+    inline constexpr std::uint32_t density_grid_steady_nonuniform_samples  = nerf_grid_cells / 16u;
+    inline constexpr float density_grid_decay                              = 0.95f;
 
     inline constexpr float optimizer_learning_rate = 5.0e-4f;
     inline constexpr float optimizer_beta1         = 0.9f;
@@ -122,6 +134,7 @@ namespace hyfluid::train::config {
 
     static_assert((nerf_grid_size & (nerf_grid_size - 1u)) == 0u);
     static_assert(nerf_grid_cells % 8u == 0u);
+    static_assert(nerf_grid_bitfield_bytes * 8u == nerf_grid_cells);
     static_assert(hash4_level_count == 16u);
     static_assert(hash4_features_per_level == 2u);
     static_assert(hash4_output_width == 32u);
@@ -137,6 +150,13 @@ namespace hyfluid::train::config {
     static_assert(evaluation_tile_pixels * evaluation_ray_steps <= max_samples);
     static_assert(max_samples != 0u);
     static_assert(max_samples == network_batch_size);
+    static_assert(max_rays_per_batch >= initial_rays_per_batch);
+    static_assert(max_rays_per_batch % network_batch_granularity == 0u);
+    static_assert(max_rays_per_batch * training_ray_steps <= network_batch_size);
+    static_assert(density_grid_warmup_samples <= nerf_grid_cells);
+    static_assert(density_grid_warmup_samples % network_batch_size == 0u);
+    static_assert(density_grid_warmup_passes != 0u);
+    static_assert(density_grid_steady_uniform_samples + density_grid_steady_nonuniform_samples <= max_samples);
     static_assert(network_parameter_layout.hash4_offsets[0u] == 0u);
     static_assert(network_parameter_layout.mlp_input_weight_offset == 0u);
     static_assert(network_parameter_layout.mlp_output_weight_offset == mlp_width * mlp_input_width);

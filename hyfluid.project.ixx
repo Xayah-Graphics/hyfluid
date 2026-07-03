@@ -26,6 +26,7 @@ export namespace hyfluid::project {
         void set_show_field_domain(bool value);
         void set_show_active_domain(bool value);
         void set_show_volume(bool value);
+        void set_density_scale(float value);
         void set_show_occupancy(bool value);
         void set_occupancy_alpha(float value);
         void set_occupancy_cell_scale(float value);

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 4.3.0)
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
-project(HyFluid VERSION 1.0.0 LANGUAGES CXX CUDA)
+project(HyFluid VERSION 1.1.0 LANGUAGES CXX CUDA)
 
 option(HYFLUID_BUILD_APP "Build the optional HyFluid executable" OFF)
 option(HYFLUID_BUILD_PROJECT_PLUGIN "Build the optional Spectra project plugin" OFF)
