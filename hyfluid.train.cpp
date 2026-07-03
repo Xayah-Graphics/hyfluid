@@ -260,7 +260,7 @@ namespace hyfluid::train {
                         if (frame_indices[frame_grid_index] != std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{std::format("frame set '{}' contains duplicate frame at view {} time {}.", frame_set.name, frame.view_index, frame.time_index)};
                         frame_indices[frame_grid_index] = frame_index;
 
-                        pixels.append_range(frame.rgba);
+                        pixels.insert(pixels.end(), frame.rgba.begin(), frame.rgba.end());
                         camera.append_range(frame_camera);
                         intrinsics.push_back(frame.focal_x);
                         intrinsics.push_back(frame.focal_y);

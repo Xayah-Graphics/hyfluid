@@ -896,7 +896,7 @@ namespace hyfluid::cuda {
         const std::size_t occupancy_bytes       = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
         const std::size_t occupancy_count_bytes = static_cast<std::size_t>(occupancy_grid_bin_count) * sizeof(std::uint32_t);
 
-        if (const cudaError_t status = cudaMalloc(&out_sample_coords, static_cast<std::size_t>(train::config::max_samples) * train::config::sample_coord_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample coords failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_sample_coords, static_cast<std::size_t>(train::config::network_buffer_capacity) * train::config::sample_coord_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler sample coords failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_rays, static_cast<std::size_t>(train::config::network_batch_size) * train::config::ray_floats * sizeof(float)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler rays failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_ray_indices, static_cast<std::size_t>(train::config::network_batch_size) * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler ray indices failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_numsteps, static_cast<std::size_t>(train::config::network_batch_size) * 2u * sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc sampler numsteps failed: "} + cudaGetErrorString(status)};
@@ -981,9 +981,9 @@ namespace hyfluid::cuda {
         cublasLtHandle_t handle = nullptr;
         if (const cublasStatus_t status = cublasLtCreate(&handle); status != CUBLAS_STATUS_SUCCESS) throw std::runtime_error{std::string{"cublasLtCreate failed: "} + cublasGetStatusString(status)};
         out_cublaslt_handle = reinterpret_cast<void*>(handle);
-        if (const cudaError_t status = cudaMalloc(&out_network_input, static_cast<std::size_t>(train::config::network_batch_size) * train::config::hash4_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network input failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_network_hidden, static_cast<std::size_t>(train::config::network_batch_size) * train::config::mlp_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network hidden failed: "} + cudaGetErrorString(status)};
-        if (const cudaError_t status = cudaMalloc(&out_network_output, static_cast<std::size_t>(train::config::max_samples) * train::config::network_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network output failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_network_input, static_cast<std::size_t>(train::config::network_buffer_capacity) * train::config::hash4_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network input failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_network_hidden, static_cast<std::size_t>(train::config::network_buffer_capacity) * train::config::mlp_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network hidden failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMalloc(&out_network_output, static_cast<std::size_t>(train::config::network_buffer_capacity) * train::config::network_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network output failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_network_input_gradients, static_cast<std::size_t>(train::config::network_batch_size) * train::config::hash4_output_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network input gradients failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_network_hidden_gradients, static_cast<std::size_t>(train::config::network_batch_size) * train::config::mlp_width * sizeof(__half)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc network hidden gradients failed: "} + cudaGetErrorString(status)};
         if (const cudaError_t status = cudaMalloc(&out_cublaslt_workspace, train::config::cublaslt_workspace_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMalloc cublasLt workspace failed: "} + cudaGetErrorString(status)};
@@ -1044,8 +1044,8 @@ namespace hyfluid::cuda {
 
     void evaluate_network(const std::uint32_t sample_count, const float* const sample_coords, const std::uint16_t* const params, std::uint16_t* const network_input, std::uint16_t* const network_hidden, std::uint16_t* const network_output, void* const cublaslt_handle, std::uint8_t* const cublaslt_workspace) {
         if (sample_count == 0u) return;
-        if (sample_count > train::config::network_batch_size || sample_coords == nullptr || params == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr) throw std::runtime_error{"invalid network evaluation input."};
-        constexpr dim3 grid_blocks{(train::config::network_batch_size + train::config::grid_forward_threads - 1u) / train::config::grid_forward_threads, train::config::hash4_level_count, 1u};
+        if (sample_count > train::config::network_buffer_capacity || sample_coords == nullptr || params == nullptr || network_input == nullptr || network_hidden == nullptr || network_output == nullptr || cublaslt_handle == nullptr || cublaslt_workspace == nullptr) throw std::runtime_error{"invalid network evaluation input."};
+        const dim3 grid_blocks{(sample_count + train::config::grid_forward_threads - 1u) / train::config::grid_forward_threads, train::config::hash4_level_count, 1u};
         hash4_encode_forward_kernel<<<grid_blocks, train::config::grid_forward_threads>>>(sample_count, sample_coords, reinterpret_cast<const __half*>(params + train::config::network_parameter_layout.hash4_param_offset), reinterpret_cast<__half*>(network_input));
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"hash4_encode_forward_kernel failed: "} + cudaGetErrorString(status)};
         const auto cublaslt = static_cast<cublasLtHandle_t>(cublaslt_handle);
@@ -1144,7 +1144,7 @@ namespace hyfluid::cuda {
             if (const cudaError_t status = cudaMemset(evaluation_sample_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset evaluation sample counter failed: "} + cudaGetErrorString(status)};
             if (const cudaError_t status = cudaMemset(evaluation_overflow_counter, 0, sizeof(std::uint32_t)); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset evaluation overflow counter failed: "} + cudaGetErrorString(status)};
 
-            generate_evaluation_samples_kernel<<<(tile_pixels + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(tile_pixels, pixel_offset, train::config::max_samples, render_width, view_index, time_index, time_count, camera, intrinsics, frame_indices, field_to_world_linear, evaluation_sample_counter, evaluation_overflow_counter, evaluation_numsteps, sample_coords);
+            generate_evaluation_samples_kernel<<<(tile_pixels + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(tile_pixels, pixel_offset, train::config::evaluation_network_batch_size, render_width, view_index, time_index, time_count, camera, intrinsics, frame_indices, field_to_world_linear, evaluation_sample_counter, evaluation_overflow_counter, evaluation_numsteps, sample_coords);
             if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"generate_evaluation_samples_kernel failed: "} + cudaGetErrorString(status)};
 
             std::uint32_t overflow_count = 0u;
@@ -1152,7 +1152,7 @@ namespace hyfluid::cuda {
             if (overflow_count != 0u) throw std::runtime_error{"evaluation sample generation exceeded network batch capacity."};
             std::uint32_t sample_count = 0u;
             read_counter(evaluation_sample_counter, sample_count);
-            if (sample_count > train::config::network_batch_size) throw std::runtime_error{"evaluation sample count exceeds network batch size."};
+            if (sample_count > train::config::evaluation_network_batch_size) throw std::runtime_error{"evaluation sample count exceeds network batch size."};
             evaluate_network(sample_count, sample_coords, params, network_input, network_hidden, network_output, cublaslt_handle, cublaslt_workspace);
 
             compose_evaluation_image_kernel<<<(tile_pixels + train::config::threads_per_block - 1u) / train::config::threads_per_block, train::config::threads_per_block>>>(tile_pixels, pixel_offset, render_width, view_index, time_index, time_count, width, height, pixels, frame_indices, reinterpret_cast<const __half*>(network_output), evaluation_numsteps, sample_coords, reinterpret_cast<const __half*>(params), evaluation_loss_sum, evaluation_pixels);
