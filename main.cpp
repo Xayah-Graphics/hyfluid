@@ -6,8 +6,16 @@ import hyfluid.inspector;
 
 int main(const int argc, const char* const* const argv) {
     const std::span arguments{argv, static_cast<std::size_t>(argc)};
-    constexpr std::string_view ansi_reset = "\x1b[0m";
-    constexpr std::string_view ansi_red   = "\x1b[31m";
+    constexpr std::string_view ansi_reset             = "\x1b[0m";
+    constexpr std::string_view ansi_dim               = "\x1b[2m";
+    constexpr std::string_view ansi_bold              = "\x1b[1m";
+    constexpr std::string_view ansi_cyan              = "\x1b[36m";
+    constexpr std::string_view ansi_green             = "\x1b[32m";
+    constexpr std::string_view ansi_yellow            = "\x1b[33m";
+    constexpr std::string_view ansi_red               = "\x1b[31m";
+    constexpr std::string_view ansi_evaluation_badge  = "\x1b[1;37;45m";
+    constexpr std::string_view ansi_evaluation_metric = "\x1b[1;95m";
+    constexpr float scene_scale                       = 1.0f;
 
     std::filesystem::path dataset_path;
     std::vector<std::string> requested_frame_sets;
@@ -162,9 +170,48 @@ int main(const int argc, const char* const* const argv) {
         }
     }
 
+    std::string frame_set_stage;
+    for (std::size_t i = 0uz; i < requested_frame_sets.size(); ++i) {
+        if (i != 0uz) frame_set_stage += "+";
+        frame_set_stage += requested_frame_sets[i];
+    }
+    std::string optimize_stage = "off";
+    if (optimize_iterations > 0) {
+        if (writes_evaluation_output) {
+            optimize_stage = "train";
+            if (include_test_in_training) optimize_stage += "+test";
+        } else {
+            optimize_stage = requested_frame_sets.front();
+        }
+    }
+    const std::string evaluation_stage = writes_evaluation_output ? std::format("test,output={}", evaluation_output_path.string()) : std::string{"off"};
+    const std::string training_log_stage = command.option_provided("training-log") ? training_log_path.string() : std::string{"off"};
+
+    const auto config_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    std::println("{}[{:%F %T}]{} {}{:<8}{} dataset={} scene_scale={} frame_sets={} optimize={} steps={} log_every={} evaluation={} training_log={} load_weights={} save_weights={}",
+                 ansi_dim,
+                 config_timestamp,
+                 ansi_reset,
+                 ansi_cyan,
+                 "CONFIG",
+                 ansi_reset,
+                 dataset_path.string(),
+                 scene_scale,
+                 frame_set_stage,
+                 optimize_stage,
+                 optimize_iterations,
+                 log_every,
+                 evaluation_stage,
+                 training_log_stage,
+                 load_weights_path.has_value() ? load_weights_path->string() : "none",
+                 save_weights_path.has_value() ? save_weights_path->string() : "none");
+
+    const auto load_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    std::println("{}[{:%F %T}]{} {}{:<8}{} loading dataset", ansi_dim, load_timestamp, ansi_reset, ansi_cyan, "INFO", ansi_reset);
+
     const std::expected<dataset::scalar_real::Dataset, std::string> loaded_dataset = dataset::scalar_real::load(dataset_path, dataset::scalar_real::LoadRequest{
                                                                                                                                   .frame_sets  = requested_frame_sets,
-                                                                                                                                  .scene_scale = 1.0f,
+                                                                                                                                  .scene_scale = scene_scale,
                                                                                                                               });
     if (!loaded_dataset) {
         std::println("{}error:{} {}", ansi_red, ansi_reset, loaded_dataset.error());
@@ -181,30 +228,8 @@ int main(const int argc, const char* const* const argv) {
                 std::println("{}error:{} {}", ansi_red, ansi_reset, loaded_weights.error());
                 return 1;
             }
-            std::println("weights loaded: {}", load_weights_path->string());
-        }
-        std::uint64_t total_pixel_bytes = 0u;
-        std::uint64_t total_frame_count  = 0u;
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
-            const std::uint64_t frame_count = static_cast<std::uint64_t>(frame_set.view_count) * frame_set.time_count;
-            total_pixel_bytes += static_cast<std::uint64_t>(frame_set.width) * frame_set.height * 4ull * frame_count;
-            total_frame_count += frame_count;
-        }
-
-        std::println("HyFluid ScalarReal dataset loaded.");
-        std::println("path: {}", dataset_path.string());
-        std::println("scene_scale: {:.6f}", dataset.scene_scale);
-        std::println("near/far: {:.6f} / {:.6f}", dataset.near, dataset.far);
-        std::println("frame sets: {}", hyfluid.host.frame_sets.size());
-        std::println("videos: {}", dataset.videos.size());
-        std::println("frames: {}", total_frame_count);
-        std::println("pixel storage: {:.3f} MiB", static_cast<double>(total_pixel_bytes) / 1048576.0);
-        std::println("train dataset upload: ok");
-
-        for (const hyfluid::train::HyFluid::HostFrameSet& frame_set : hyfluid.host.frame_sets) {
-            const std::uint64_t frame_count = static_cast<std::uint64_t>(frame_set.view_count) * frame_set.time_count;
-            const std::uint64_t pixel_bytes = static_cast<std::uint64_t>(frame_set.width) * frame_set.height * 4ull * frame_count;
-            std::println("frame_set '{}': {} frames, {} views x {} times, {:.3f} MiB pixels", frame_set.name, frame_count, frame_set.view_count, frame_set.time_count, static_cast<double>(pixel_bytes) / 1048576.0);
+            const auto weights_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            std::println("{}[{:%F %T}]{} {}{:<8}{} loaded={}", ansi_dim, weights_timestamp, ansi_reset, ansi_yellow, "WEIGHT", ansi_reset, load_weights_path->string());
         }
 
         if (optimize_iterations > 0) {
@@ -242,12 +267,6 @@ int main(const int argc, const char* const* const argv) {
                     return 1;
                 }
             }
-            std::string optimize_frame_set_weight_label;
-            for (std::size_t i = 0uz; i < optimize_frame_sets.size(); ++i) {
-                if (i != 0uz) optimize_frame_set_weight_label += ", ";
-                optimize_frame_set_weight_label += std::format("{}={}", optimize_frame_sets[i], optimize_frame_set_weights[i]);
-            }
-            std::println("optimization frame sets: {} ({})", optimize_frame_set_label, optimize_frame_set_weight_label);
             std::ofstream training_log;
             if (command.option_provided("training-log")) {
                 if (training_log_path.has_parent_path()) std::filesystem::create_directories(training_log_path.parent_path());
@@ -259,14 +278,21 @@ int main(const int argc, const char* const* const argv) {
             }
 
             std::vector<std::pair<std::int32_t, float>> recent_psnr;
-            recent_psnr.reserve(1000uz);
+            if (training_log) recent_psnr.reserve(1000uz);
             std::int32_t recent_psnr_steps = 0;
             std::int32_t remaining_iterations = optimize_iterations;
+            bool first_optimization_chunk = true;
+            float first_loss = 0.0f;
+            float last_loss = 0.0f;
+            float optimize_ms = 0.0f;
+            std::uint32_t final_step = 0u;
+            std::optional<hyfluid::train::EvaluationStats> final_evaluation;
             while (remaining_iterations > 0) {
                 const std::int32_t chunk_iterations = std::min(log_every, remaining_iterations);
                 std::optional<hyfluid::train::OptimizationStats> chunk_stats;
                 std::int32_t distributed_iterations = 0;
                 std::uint64_t distributed_weight = 0u;
+                float chunk_ms = 0.0f;
                 for (std::size_t frame_set_index = 0uz; frame_set_index < optimize_frame_sets.size(); ++frame_set_index) {
                     const std::uint64_t next_distributed_weight = distributed_weight + optimize_frame_set_weights[frame_set_index];
                     const auto previous_iteration_boundary = static_cast<std::int32_t>(static_cast<std::uint64_t>(chunk_iterations) * distributed_weight / optimize_frame_set_weight_sum);
@@ -283,6 +309,7 @@ int main(const int argc, const char* const* const argv) {
                         std::println("{}error:{} {}", ansi_red, ansi_reset, stats.error());
                         return 1;
                     }
+                    chunk_ms += stats->elapsed_ms;
                     chunk_stats = *stats;
                 }
                 if (!chunk_stats.has_value() || distributed_iterations != chunk_iterations) {
@@ -290,61 +317,53 @@ int main(const int argc, const char* const* const argv) {
                     return 1;
                 }
                 const hyfluid::train::OptimizationStats& stats = *chunk_stats;
-                const hyfluid::inspector::TrainingBatchDiagnostics batch_diagnostics = inspector.training_batch_diagnostics();
-                const hyfluid::inspector::TrainingModelDiagnostics model_diagnostics = inspector.training_model_diagnostics();
 
-                recent_psnr.push_back({chunk_iterations, stats.psnr});
-                recent_psnr_steps += chunk_iterations;
-                while (recent_psnr_steps > 1000 && !recent_psnr.empty()) {
-                    const std::int32_t excess_steps = recent_psnr_steps - 1000;
-                    if (recent_psnr.front().first <= excess_steps) {
-                        recent_psnr_steps -= recent_psnr.front().first;
-                        recent_psnr.erase(recent_psnr.begin());
-                    } else {
-                        recent_psnr.front().first -= excess_steps;
-                        recent_psnr_steps -= excess_steps;
-                    }
-                }
-                double recent_psnr_sum = 0.0;
-                for (const std::pair<std::int32_t, float>& value : recent_psnr) recent_psnr_sum += static_cast<double>(value.first) * static_cast<double>(value.second);
-                const auto recent_psnr_mean = static_cast<float>(recent_psnr_sum / static_cast<double>(recent_psnr_steps));
+                if (first_optimization_chunk) first_loss = stats.loss;
+                first_optimization_chunk = false;
+                last_loss = stats.loss;
+                optimize_ms += chunk_ms;
+                final_step = stats.step;
 
-                std::println("density optimize: frame_set={} step={} loss={:.6g} psnr={:.3f} recent_psnr={:.3f} rays={}/{} next_rays={} samples={}/{} sample_eff={:.2f}% coord_min=[{:.4f},{:.4f},{:.4f}] coord_max=[{:.4f},{:.4f},{:.4f}] time=[{:.4f},{:.4f}] dt_metric=[{:.8f},{:.8f},{:.8f}] metric_per_field_unit=[{:.6f},{:.6f},{:.6f}] global_rgb=[param {:.6g}, color {:.6g}, grad {:.6g}] occupancy_cells={} occupancy_grid={:.2f}% updated_bin={} bin_cells={} elapsed={:.3f}ms",
+                const auto optimize_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                std::println("{}[{:%F %T}]{} {}{:<8}{} frame_set={} step={:>6}/{} loss={:>10.6f} psnr={:>5.2f} chunk={:>8.3f}ms rate={:>7.2f} step/s next_rays={:>6} samples={:>7}/{:<7} sample_eff={:>6.2f}% occupancy_grid={:>6.2f}% updated_bin={}",
+                             ansi_dim,
+                             optimize_timestamp,
+                             ansi_reset,
+                             ansi_green,
+                             "OPTIMIZE",
+                             ansi_reset,
                              optimize_frame_set_label,
                              stats.step,
+                             optimize_iterations,
                              stats.loss,
                              stats.psnr,
-                             recent_psnr_mean,
-                             stats.ray_count,
-                             stats.rays_per_batch,
+                             chunk_ms,
+                             static_cast<float>(chunk_iterations) * 1000.0f / chunk_ms,
                              stats.next_rays_per_batch,
                              stats.sample_count,
                              stats.sample_count_before_compaction,
                              stats.sample_efficiency_ratio * 100.0f,
-                             batch_diagnostics.sample_coord_min[0u],
-                             batch_diagnostics.sample_coord_min[1u],
-                             batch_diagnostics.sample_coord_min[2u],
-                             batch_diagnostics.sample_coord_max[0u],
-                             batch_diagnostics.sample_coord_max[1u],
-                             batch_diagnostics.sample_coord_max[2u],
-                             batch_diagnostics.time_min,
-                             batch_diagnostics.time_max,
-                             batch_diagnostics.dt_metric_min,
-                             batch_diagnostics.dt_metric_mean,
-                             batch_diagnostics.dt_metric_max,
-                             batch_diagnostics.metric_per_field_unit_min,
-                             batch_diagnostics.metric_per_field_unit_mean,
-                             batch_diagnostics.metric_per_field_unit_max,
-                             model_diagnostics.global_rgb_param,
-                             model_diagnostics.global_rgb_color,
-                             model_diagnostics.global_rgb_gradient,
-                             stats.occupancy_grid_occupied_cells,
                              stats.occupancy_grid_ratio * 100.0f,
-                             stats.occupancy_grid_updated_bin,
-                             stats.occupancy_grid_updated_bin_occupied_cells,
-                             stats.elapsed_ms);
+                             stats.occupancy_grid_updated_bin);
 
                 if (training_log) {
+                    recent_psnr.push_back({chunk_iterations, stats.psnr});
+                    recent_psnr_steps += chunk_iterations;
+                    while (recent_psnr_steps > 1000 && !recent_psnr.empty()) {
+                        const std::int32_t excess_steps = recent_psnr_steps - 1000;
+                        if (recent_psnr.front().first <= excess_steps) {
+                            recent_psnr_steps -= recent_psnr.front().first;
+                            recent_psnr.erase(recent_psnr.begin());
+                        } else {
+                            recent_psnr.front().first -= excess_steps;
+                            recent_psnr_steps -= excess_steps;
+                        }
+                    }
+                    double recent_psnr_sum = 0.0;
+                    for (const std::pair<std::int32_t, float>& value : recent_psnr) recent_psnr_sum += static_cast<double>(value.first) * static_cast<double>(value.second);
+                    const auto recent_psnr_mean = static_cast<float>(recent_psnr_sum / static_cast<double>(recent_psnr_steps));
+                    const hyfluid::inspector::TrainingBatchDiagnostics batch_diagnostics = inspector.training_batch_diagnostics();
+                    const hyfluid::inspector::TrainingModelDiagnostics model_diagnostics = inspector.training_model_diagnostics();
                     training_log << std::format("{{\"step\":{},\"loss\":{:.9g},\"psnr\":{:.9g},\"recent_psnr\":{:.9g},\"ray_count\":{},\"rays_per_batch\":{},\"next_rays_per_batch\":{},\"sample_count\":{},\"sample_count_before_compaction\":{},\"sample_efficiency_ratio\":{:.9g},\"coord_min\":[{:.9g},{:.9g},{:.9g}],\"coord_max\":[{:.9g},{:.9g},{:.9g}],\"time_min\":{:.9g},\"time_max\":{:.9g},\"dt_metric_min\":{:.9g},\"dt_metric_mean\":{:.9g},\"dt_metric_max\":{:.9g},\"metric_per_field_unit_min\":{:.9g},\"metric_per_field_unit_mean\":{:.9g},\"metric_per_field_unit_max\":{:.9g},\"global_rgb_param\":{:.9g},\"global_rgb_color\":{:.9g},\"global_rgb_gradient\":{:.9g},\"occupancy_grid_occupied_cells\":{},\"occupancy_grid_ratio\":{:.9g},\"occupancy_grid_updated_bin\":{},\"occupancy_grid_updated_bin_occupied_cells\":{},\"elapsed_ms\":{:.9g}}}\n",
                                                 stats.step,
                                                 stats.loss,
@@ -377,7 +396,7 @@ int main(const int argc, const char* const* const argv) {
                                                 stats.occupancy_grid_ratio,
                                                 stats.occupancy_grid_updated_bin,
                                                 stats.occupancy_grid_updated_bin_occupied_cells,
-                                                stats.elapsed_ms);
+                                                chunk_ms);
                     training_log.flush();
                 }
                 remaining_iterations -= chunk_iterations;
@@ -392,18 +411,60 @@ int main(const int argc, const char* const* const argv) {
                     std::println("{}error:{} {}", ansi_red, ansi_reset, evaluation.error());
                     return 1;
                 }
-                std::println("density evaluate: frame_set={} step={} images={}/{} render={}x{} pixels={} mse={:.9g} psnr={:.3f} output={} elapsed={:.3f}ms",
+                final_evaluation = *evaluation;
+                const auto evaluation_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                std::println("{}[{:%F %T}]{} {} {:<8} {} frame_set={} step={:>6} | {}MSE={:.8f}{} {}PSNR={:>5.2f}{} | images={:>3}/{} pixels={} output={} eval={:>8.3f}ms",
+                             ansi_dim,
+                             evaluation_timestamp,
+                             ansi_reset,
+                             ansi_evaluation_badge,
+                             "EVAL",
+                             ansi_reset,
                              evaluation->frame_set,
                              evaluation->step,
+                             ansi_evaluation_metric,
+                             evaluation->mse,
+                             ansi_reset,
+                             ansi_cyan,
+                             evaluation->psnr,
+                             ansi_reset,
                              evaluation->rendered_image_count,
                              evaluation->image_count,
-                             evaluation->render_width,
-                             evaluation->render_height,
                              evaluation->pixel_count,
-                             evaluation->mse,
-                             evaluation->psnr,
                              evaluation->output_dir.string(),
                              evaluation->elapsed_ms);
+            }
+            const auto summary_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            if (final_evaluation.has_value()) {
+                std::println("{}[{:%F %T}]{} {}{:<8}{} steps={} first_loss={:.6f} last_loss={:.6f} optimize={:.3f}s avg={:.2f} step/s evaluation={}:{:.8f}@{} psnr={:.2f}",
+                             ansi_dim,
+                             summary_timestamp,
+                             ansi_reset,
+                             ansi_bold,
+                             "SUMMARY",
+                             ansi_reset,
+                             final_step,
+                             first_loss,
+                             last_loss,
+                             optimize_ms * 0.001f,
+                             static_cast<float>(optimize_iterations) * 1000.0f / optimize_ms,
+                             final_evaluation->frame_set,
+                             final_evaluation->mse,
+                             final_evaluation->step,
+                             final_evaluation->psnr);
+            } else {
+                std::println("{}[{:%F %T}]{} {}{:<8}{} steps={} first_loss={:.6f} last_loss={:.6f} optimize={:.3f}s avg={:.2f} step/s evaluation=off",
+                             ansi_dim,
+                             summary_timestamp,
+                             ansi_reset,
+                             ansi_bold,
+                             "SUMMARY",
+                             ansi_reset,
+                             final_step,
+                             first_loss,
+                             last_loss,
+                             optimize_ms * 0.001f,
+                             static_cast<float>(optimize_iterations) * 1000.0f / optimize_ms);
             }
         }
         if (save_weights_path.has_value()) {
@@ -412,7 +473,8 @@ int main(const int argc, const char* const* const argv) {
                 std::println("{}error:{} {}", ansi_red, ansi_reset, saved_weights.error());
                 return 1;
             }
-            std::println("weights saved: {}", save_weights_path->string());
+            const auto weights_timestamp = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            std::println("{}[{:%F %T}]{} {}{:<8}{} saved={}", ansi_dim, weights_timestamp, ansi_reset, ansi_yellow, "WEIGHT", ansi_reset, save_weights_path->string());
         }
 
         return 0;
