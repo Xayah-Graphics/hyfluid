@@ -99,7 +99,7 @@ set_property(TARGET libhyfluid PROPERTY CXX_MODULE_STD ON)
 # Optional Dataset Loading
 # ============================================================================
 if (HYFLUID_BUILD_APP OR HYFLUID_BUILD_PROJECT_PLUGIN)
-    set(HYFLUID_DATASET_GIT_TAG "31049346009e6452bcc6abd7f65f773d7512cef0")
+    set(HYFLUID_DATASET_GIT_TAG "a91368d236fe236779f4a816ff7eee25dec127cb")
     set(HYFLUID_DATASET_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor/dataset/${HYFLUID_DATASET_GIT_TAG}")
     download_if_needed(
             "https://raw.githubusercontent.com/Xayah-Graphics/dataset/${HYFLUID_DATASET_GIT_TAG}/scalar_real.ixx"
