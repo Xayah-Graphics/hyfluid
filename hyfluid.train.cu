@@ -911,7 +911,7 @@ namespace hyfluid::cuda {
         if (occupancy_grid_bin_count > std::numeric_limits<std::size_t>::max() / train::config::nerf_grid_bitfield_bytes) throw std::runtime_error{"occupancy grid temporal bank is too large."};
         const std::size_t occupancy_bytes = static_cast<std::size_t>(occupancy_grid_bin_count) * train::config::nerf_grid_bitfield_bytes;
         if (const cudaError_t status = cudaMemset(occupancy, 0xFF, occupancy_bytes); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemset full occupancy failed: "} + cudaGetErrorString(status)};
-        std::vector<std::uint32_t> full_counts(occupancy_grid_bin_count, train::config::nerf_grid_cells);
+        const std::vector full_counts(occupancy_grid_bin_count, train::config::nerf_grid_cells);
         if (const cudaError_t status = cudaMemcpy(occupancy_grid_bin_counts, full_counts.data(), full_counts.size() * sizeof(std::uint32_t), cudaMemcpyHostToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy full occupancy bin counts failed: "} + cudaGetErrorString(status)};
     }
 
@@ -1211,9 +1211,9 @@ namespace hyfluid::cuda {
         if (const cudaError_t status = cudaGetLastError(); status != cudaSuccess) throw std::runtime_error{std::string{"radam_step_kernel failed: "} + cudaGetErrorString(status)};
     }
 
-    void read_counter(const std::uint32_t* const counter, std::uint32_t& value) {
+    void read_counter(const std::uint32_t* const counter, std::uint32_t& out_value) {
         if (counter == nullptr) throw std::runtime_error{"counter read input is null."};
-        if (const cudaError_t status = cudaMemcpy(&value, counter, sizeof(std::uint32_t), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy counter read failed: "} + cudaGetErrorString(status)};
+        if (const cudaError_t status = cudaMemcpy(&out_value, counter, sizeof(std::uint32_t), cudaMemcpyDeviceToHost); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy counter read failed: "} + cudaGetErrorString(status)};
     }
 
     void read_loss_sum(const float* const loss_values, const std::uint32_t loss_count, float& out_loss_sum) {
