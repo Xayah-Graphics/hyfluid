@@ -38,7 +38,6 @@ namespace hyfluid::project {
         constexpr char section_domain_id[]                = "domain";
         constexpr char section_timeline_id[]              = "timeline";
         constexpr char section_field_id[]                 = "field";
-        constexpr char section_sampler_id[]               = "sampler";
         constexpr char section_diagnostics_id[]           = "diagnostics";
         constexpr char setting_show_field_domain_key[]    = "show_field_domain";
         constexpr char setting_show_active_domain_key[]   = "show_active_domain";
@@ -47,17 +46,9 @@ namespace hyfluid::project {
         constexpr char setting_show_occupancy_key[]       = "show_occupancy";
         constexpr char setting_occupancy_alpha_key[]      = "occupancy_alpha";
         constexpr char setting_occupancy_cell_scale_key[] = "occupancy_cell_scale";
-        constexpr char setting_show_sampler_key[]         = "show_sampler";
-        constexpr char setting_show_sampler_points_key[]  = "show_sampler_points";
-        constexpr char setting_show_sampler_rays_key[]    = "show_sampler_rays";
-        constexpr char setting_sampler_point_radius_key[] = "sampler_point_radius";
-        constexpr char setting_sampler_ray_width_key[]    = "sampler_ray_width";
         constexpr char density_volume_name[]              = "HyFluid Density";
         constexpr char density_material_name[]            = "HyFluid Density Material";
         constexpr char density_light_name[]               = "HyFluid Density Key Light";
-        constexpr char sampler_point_cloud_name[]         = "HyFluid Sampler Samples";
-        constexpr char sampler_ray_segments_name[]        = "HyFluid Sampler Rays";
-        constexpr char sampler_material_name[]            = "HyFluid Sampler Point Material";
         constexpr char field_domain_name[]                = "HyFluid Field Domain";
         constexpr char active_domain_name[]               = "HyFluid Active Domain";
 
@@ -93,14 +84,9 @@ namespace hyfluid::project {
             bool show_active_domain{true};
             bool show_volume{true};
             bool show_occupancy{false};
-            bool show_sampler{false};
-            bool show_sampler_points{true};
-            bool show_sampler_rays{true};
             float density_scale{0.02f};
             float occupancy_alpha{0.18f};
             float occupancy_cell_scale{0.75f};
-            float sampler_point_radius{0.002f};
-            float sampler_ray_width{1.5f};
         };
 
         struct FrameSetRuntime final {
@@ -486,10 +472,6 @@ namespace hyfluid::project {
         ExternalGpuBuffer occupancy_buffer{};
         std::optional<plugin::VolumeGrid> density_volume{};
         std::optional<plugin::ViewportVoxelGrid> occupancy_grid{};
-        ExternalGpuBuffer sampler_points_buffer{};
-        ExternalGpuBuffer sampler_segments_buffer{};
-        std::optional<plugin::PointCloud> sampler_point_cloud{};
-        std::optional<plugin::ViewportSegmentSet> sampler_ray_segments{};
         std::optional<plugin::ViewportSegmentSet> field_domain_segments{};
         std::optional<plugin::ViewportSegmentSet> active_domain_segments{};
         plugin::DebugAttachmentSet debug_attachments{};
@@ -499,10 +481,7 @@ namespace hyfluid::project {
         std::uint64_t scene_revision{1u};
         std::uint64_t exported_density_revision{};
         std::uint64_t exported_density_byte_size{};
-        std::uint64_t exported_sampler_revision{};
         std::uint64_t current_timeline_frame_index{};
-        std::uint32_t exported_sampler_point_count{};
-        std::uint32_t exported_sampler_ray_count{};
         double timeline_frame_rate{};
         bool host_update_running{};
     };
@@ -675,7 +654,6 @@ namespace hyfluid::project {
             state.debug_attachments.viewport_segment_sets.clear();
             if (state.field_domain_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.field_domain_segments);
             if (state.active_domain_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.active_domain_segments);
-            if (state.sampler_ray_segments.has_value()) state.debug_attachments.viewport_segment_sets.push_back(*state.sampler_ray_segments);
         }
 
         void publish_domain_visualization_if_ready(Project::State& state) {
@@ -829,117 +807,6 @@ namespace hyfluid::project {
             return true;
         }
 
-        void reset_sampler_visualization(Project::State& state, const bool release_buffers) noexcept {
-            state.sampler_point_cloud.reset();
-            state.sampler_ray_segments.reset();
-            state.exported_sampler_revision    = 0u;
-            state.exported_sampler_point_count = 0u;
-            state.exported_sampler_ray_count   = 0u;
-            if (release_buffers) {
-                state.sampler_points_buffer.reset();
-                state.sampler_segments_buffer.reset();
-            }
-            rebuild_debug_attachments(state);
-        }
-
-        void publish_sampler_visualization_if_ready(Project::State& state, const std::uint64_t timeline_frame_index) {
-            if (!state.debug.show_sampler || state.trainer == nullptr || (!state.debug.show_sampler_points && !state.debug.show_sampler_rays)) {
-                reset_sampler_visualization(state, true);
-                return;
-            }
-
-            const inspector::Inspector inspector{*state.trainer};
-            const inspector::SamplerBatchDeviceView view = inspector.sampler_batch_device_view();
-            if (!view.initialized) {
-                reset_sampler_visualization(state, true);
-                return;
-            }
-            if (view.sample_count == 0u || view.ray_count == 0u) throw std::runtime_error{"HyFluid sampler visualization last batch is empty."};
-            if (view.sample_count > std::numeric_limits<std::uint64_t>::max() / inspector::SamplerPointInstanceBytes) throw std::runtime_error{"HyFluid sampler point visualization byte size overflows uint64."};
-            if (view.ray_count > std::numeric_limits<std::uint64_t>::max() / inspector::SamplerSegmentInstanceBytes) throw std::runtime_error{"HyFluid sampler ray visualization byte size overflows uint64."};
-
-            const std::uint64_t point_byte_size   = static_cast<std::uint64_t>(view.sample_count) * inspector::SamplerPointInstanceBytes;
-            const std::uint64_t segment_byte_size = static_cast<std::uint64_t>(view.ray_count) * inspector::SamplerSegmentInstanceBytes;
-            if (state.timeline_frame_count == 0u || state.timeline_frame_count > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error{"HyFluid sampler visualization timeline frame count is invalid."};
-            if (timeline_frame_index >= state.timeline_frame_count) throw std::runtime_error{"HyFluid sampler visualization frame index is outside timeline."};
-            std::byte* point_instances   = nullptr;
-            std::byte* segment_instances = nullptr;
-            std::uint64_t requested_point_bytes{};
-            std::uint64_t requested_segment_bytes{};
-            const bool needs_point_cloud = state.debug.show_sampler_points;
-
-            if (needs_point_cloud) {
-                state.sampler_points_buffer.ensure(state.host_services, plugin::GpuBufferKindPointCloud, point_byte_size, "hyfluid sampler samples", "sampler point cloud");
-                point_instances = state.sampler_points_buffer.mapped_as<std::byte>();
-                if (point_instances == nullptr) throw std::runtime_error{"HyFluid sampler point cloud external buffer was not mapped."};
-                requested_point_bytes = point_byte_size;
-            } else {
-                state.sampler_points_buffer.reset();
-                state.sampler_point_cloud.reset();
-            }
-
-            if (state.debug.show_sampler_rays) {
-                state.sampler_segments_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportSegmentSet, segment_byte_size, "hyfluid sampler rays", "sampler ray segments");
-                segment_instances = state.sampler_segments_buffer.mapped_as<std::byte>();
-                if (segment_instances == nullptr) throw std::runtime_error{"HyFluid sampler ray segment external buffer was not mapped."};
-                requested_segment_bytes = segment_byte_size;
-            } else {
-                state.sampler_segments_buffer.reset();
-                state.sampler_ray_segments.reset();
-            }
-
-            const std::expected<inspector::SamplerVisualizationStats, std::string> stats = inspector.write_sampler_visualization(inspector::SamplerVisualizationRequest{
-                .point_instances   = point_instances,
-                .point_byte_size   = requested_point_bytes,
-                .segment_instances = segment_instances,
-                .segment_byte_size = requested_segment_bytes,
-                .time_count        = static_cast<std::uint32_t>(state.timeline_frame_count),
-                .time_index        = static_cast<std::uint32_t>(timeline_frame_index),
-                .point_radius      = state.debug.sampler_point_radius,
-                .ray_width         = state.debug.sampler_ray_width,
-                .width_mode        = static_cast<std::uint32_t>(plugin::ViewportSegmentWidthMode::Screen),
-            });
-            if (!stats) throw std::runtime_error(stats.error());
-
-            state.exported_sampler_revision    = stats->revision;
-            state.exported_sampler_point_count = needs_point_cloud ? stats->point_count : 0u;
-            state.exported_sampler_ray_count   = state.debug.show_sampler_rays ? stats->ray_count : 0u;
-            state.sampler_point_cloud.reset();
-            state.sampler_ray_segments.reset();
-            if (needs_point_cloud && stats->point_count != 0u) {
-                state.sampler_point_cloud = plugin::PointCloud{
-                    .name             = sampler_point_cloud_name,
-                    .source_kind      = plugin::PointCloudSourceKind::ExternalGpuBuffer,
-                    .point_count      = stats->point_count,
-                    .buffer_id        = state.sampler_points_buffer.resource_id(),
-                    .source_byte_size = stats->point_byte_size,
-                    .revision         = stats->revision,
-                    .material_name    = sampler_material_name,
-                    .transform        = {},
-                    .bounds =
-                        plugin::Bounds{
-                            .minimum = {0.0f, 0.0f, 0.0f},
-                            .maximum = {1.0f, 1.0f, 1.0f},
-                        },
-                };
-            }
-            if (state.debug.show_sampler_rays && stats->ray_count != 0u) {
-                state.sampler_ray_segments = plugin::ViewportSegmentSet{
-                    .name             = sampler_ray_segments_name,
-                    .owner            = state.sampler_point_cloud.has_value() ? plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::PointCloud, .name = sampler_point_cloud_name} : plugin::SceneEntityRef{.kind = plugin::SceneEntityKind::Camera, .name = "Overview"},
-                    .source_kind      = plugin::ViewportSegmentSourceKind::ExternalGpuBuffer,
-                    .segment_count    = stats->ray_count,
-                    .buffer_id        = state.sampler_segments_buffer.resource_id(),
-                    .source_byte_size = stats->segment_byte_size,
-                    .revision         = stats->revision,
-                    .width            = state.debug.sampler_ray_width,
-                    .width_mode       = plugin::ViewportSegmentWidthMode::Screen,
-                    .depth_mode       = plugin::ViewportSegmentDepthMode::DepthTested,
-                };
-            }
-
-            rebuild_debug_attachments(state);
-        }
     } // namespace
 
     Project::Project(std::unique_ptr<State> state) : state(std::move(state)) {}
@@ -958,7 +825,6 @@ namespace hyfluid::project {
                     plugin::section(section_domain_id, "Domain"),
                     plugin::section(section_timeline_id, "Timeline"),
                     plugin::section(section_field_id, "Field"),
-                    plugin::section(section_sampler_id, "Sampler"),
                     plugin::section(section_diagnostics_id, "Diagnostics"),
                 },
             .open_options =
@@ -978,11 +844,6 @@ namespace hyfluid::project {
                     plugin::toggle(setting_show_occupancy_key, "Show Occupancy", false, &Project::set_show_occupancy).section(section_field_id),
                     plugin::float_value(setting_occupancy_alpha_key, "Occupancy Alpha", 0.18f, &Project::set_occupancy_alpha).section(section_field_id).slider(0.0f, 1.0f, 0.01f),
                     plugin::float_value(setting_occupancy_cell_scale_key, "Cell Scale", 0.75f, &Project::set_occupancy_cell_scale).section(section_field_id).slider(0.05f, 1.0f, 0.05f),
-                    plugin::toggle(setting_show_sampler_key, "Show Sampler", false, &Project::set_show_sampler).section(section_sampler_id),
-                    plugin::toggle(setting_show_sampler_points_key, "Show Sampler Points", true, &Project::set_show_sampler_points).section(section_sampler_id),
-                    plugin::toggle(setting_show_sampler_rays_key, "Show Sampler Rays", true, &Project::set_show_sampler_rays).section(section_sampler_id),
-                    plugin::float_value(setting_sampler_point_radius_key, "Point Radius", 0.002f, &Project::set_sampler_point_radius).section(section_sampler_id).slider(0.0001f, 0.01f, 0.0001f),
-                    plugin::float_value(setting_sampler_ray_width_key, "Ray Width", 1.5f, &Project::set_sampler_ray_width).section(section_sampler_id).slider(0.25f, 6.0f, 0.25f),
                 },
         };
         return definition;
@@ -1075,12 +936,9 @@ namespace hyfluid::project {
         scene_changed             = true;
         publish_domain_visualization_if_ready(*this->state);
         const std::uint64_t previous_density_revision = this->state->exported_density_revision;
-        const std::uint64_t previous_sampler_revision = this->state->exported_sampler_revision;
         publish_density_slice_if_ready(*this->state, update.timeline_frame_index);
         if (this->state->exported_density_revision != previous_density_revision) scene_changed = true;
         if (publish_occupancy_grid_if_ready(*this->state, update.timeline_frame_index)) scene_changed = true;
-        publish_sampler_visualization_if_ready(*this->state, update.timeline_frame_index);
-        if (this->state->exported_sampler_revision != previous_sampler_revision) scene_changed = true;
         if (scene_changed) ++this->state->scene_revision;
     }
 
@@ -1108,14 +966,6 @@ namespace hyfluid::project {
                 .kind      = "directional",
                 .color     = {1.0f, 1.0f, 1.0f},
                 .intensity = 3.0f,
-            });
-        }
-        if (this->state->debug.show_sampler && this->state->debug.show_sampler_points) {
-            materials.push_back(plugin::Material{
-                .name       = sampler_material_name,
-                .model      = "point_sprite",
-                .alpha_mode = "blend",
-                .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
             });
         }
         scene.set_document(plugin::Document{
@@ -1154,7 +1004,6 @@ namespace hyfluid::project {
         publish_domain_visualization_if_ready(*this->state);
         publish_density_slice_if_ready(*this->state, frame.frame_index);
         static_cast<void>(publish_occupancy_grid_if_ready(*this->state, frame.frame_index));
-        publish_sampler_visualization_if_ready(*this->state, frame.frame_index);
         const std::uint32_t time_index = static_cast<std::uint32_t>(frame.frame_index);
         plugin::Document document{
             .cameras           = {overview_camera()},
@@ -1168,9 +1017,6 @@ namespace hyfluid::project {
                 const dataset::scalar_real::Frame& scalar_frame = frame_set.frames.at(frame_index);
                 document.cameras.push_back(frame_camera(this->state->dataset, scalar_frame, std::format("{} view {:04}", runtime.name, view_index), this->state->dataset.near, this->state->dataset.far));
             }
-        }
-        if (this->state->sampler_point_cloud.has_value()) {
-            document.point_clouds.push_back(*this->state->sampler_point_cloud);
         }
         if (density_volume_visible(*this->state)) {
             document.volumes.push_back(*this->state->density_volume);
@@ -1218,21 +1064,16 @@ namespace hyfluid::project {
             controls.metric("density_volume_bytes", "Volume MiB", static_cast<double>(this->state->exported_density_byte_size) / 1048576.0).section(section_field_id);
             controls.metric("density_revision", "Density Rev", this->state->exported_density_revision).section(section_diagnostics_id);
         }
-        controls.metric("sampler_points", "Points", std::format("{} ({})", this->state->sampler_point_cloud.has_value() ? "visible" : "hidden", this->state->exported_sampler_point_count)).section(section_sampler_id);
-        controls.metric("sampler_rays", "Rays", std::format("{} ({})", this->state->sampler_ray_segments.has_value() ? "visible" : "hidden", this->state->exported_sampler_ray_count)).section(section_sampler_id);
-        controls.metric("sampler_revision", "Sampler Rev", this->state->exported_sampler_revision).section(section_sampler_id);
         if (this->state->latest_stats.has_value()) {
             const train::OptimizationStats& stats = *this->state->latest_stats;
-            controls.metric("step", "Step", stats.step).section(section_sampler_id).display_primary().color({0.16f, 0.86f, 0.55f, 1.0f});
-            controls.metric("loss", "Loss", std::format("{:.6g}", stats.loss)).section(section_sampler_id);
-            controls.metric("psnr", "PSNR", std::format("{:.3f}", stats.psnr)).section(section_sampler_id);
-            controls.metric("last_batch_rays", "Last Batch Rays", std::format("{}/{}", stats.ray_count, stats.rays_per_batch)).section(section_sampler_id);
-            controls.metric("filtered_rays", "Filtered Rays", this->state->exported_sampler_ray_count).section(section_sampler_id);
-            controls.metric("filtered_samples", "Filtered Samples", this->state->exported_sampler_point_count).section(section_sampler_id);
+            controls.metric("step", "Step", stats.step).section(section_diagnostics_id).display_primary().color({0.16f, 0.86f, 0.55f, 1.0f});
+            controls.metric("loss", "Loss", std::format("{:.6g}", stats.loss)).section(section_diagnostics_id);
+            controls.metric("psnr", "PSNR", std::format("{:.3f}", stats.psnr)).section(section_diagnostics_id);
+            controls.metric("last_batch_rays", "Last Batch Rays", std::format("{}/{}", stats.ray_count, stats.rays_per_batch)).section(section_diagnostics_id);
             controls.metric("samples", "Samples", std::format("{}/{}", stats.sample_count, stats.sample_count_before_compaction)).section(section_diagnostics_id);
-            controls.metric("sample_eff", "Sample Eff", std::format("{:.2f}%", stats.sample_efficiency_ratio * 100.0f)).section(section_sampler_id);
-            controls.metric("occupancy", "Occupancy Total", std::format("{:.2f}%", stats.occupancy_grid_ratio * 100.0f)).section(section_sampler_id);
-            controls.metric("updated_occupancy_bin", "Updated Bin", std::format("{} ({})", stats.occupancy_grid_updated_bin, stats.occupancy_grid_updated_bin_occupied_cells)).section(section_sampler_id);
+            controls.metric("sample_eff", "Sample Eff", std::format("{:.2f}%", stats.sample_efficiency_ratio * 100.0f)).section(section_diagnostics_id);
+            controls.metric("occupancy", "Occupancy Total", std::format("{:.2f}%", stats.occupancy_grid_ratio * 100.0f)).section(section_diagnostics_id);
+            controls.metric("updated_occupancy_bin", "Updated Bin", std::format("{} ({})", stats.occupancy_grid_updated_bin, stats.occupancy_grid_updated_bin_occupied_cells)).section(section_diagnostics_id);
         }
     }
 
@@ -1289,43 +1130,6 @@ namespace hyfluid::project {
         if (!(value > 0.0f) || value > 1.0f) throw std::runtime_error{"HyFluid occupancy cell scale must be in (0, 1]."};
         if (this->state->debug.occupancy_cell_scale == value) return;
         this->state->debug.occupancy_cell_scale = value;
-        ++this->state->scene_revision;
-    }
-
-    void Project::set_show_sampler(const bool value) {
-        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (this->state->debug.show_sampler == value) return;
-        this->state->debug.show_sampler = value;
-        ++this->state->scene_revision;
-    }
-
-    void Project::set_show_sampler_points(const bool value) {
-        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (this->state->debug.show_sampler_points == value) return;
-        this->state->debug.show_sampler_points = value;
-        ++this->state->scene_revision;
-    }
-
-    void Project::set_show_sampler_rays(const bool value) {
-        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (this->state->debug.show_sampler_rays == value) return;
-        this->state->debug.show_sampler_rays = value;
-        ++this->state->scene_revision;
-    }
-
-    void Project::set_sampler_point_radius(const float value) {
-        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (!std::isfinite(value) || value <= 0.0f) throw std::runtime_error{"HyFluid sampler point radius must be finite and positive."};
-        if (this->state->debug.sampler_point_radius == value) return;
-        this->state->debug.sampler_point_radius = value;
-        ++this->state->scene_revision;
-    }
-
-    void Project::set_sampler_ray_width(const float value) {
-        if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (!std::isfinite(value) || value <= 0.0f) throw std::runtime_error{"HyFluid sampler ray width must be finite and positive."};
-        if (this->state->debug.sampler_ray_width == value) return;
-        this->state->debug.sampler_ray_width = value;
         ++this->state->scene_revision;
     }
 } // namespace hyfluid::project
