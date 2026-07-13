@@ -110,7 +110,7 @@ namespace hyfluid::project {
             ExternalGpuBuffer& operator=(ExternalGpuBuffer&&)      = delete;
             ~ExternalGpuBuffer() noexcept;
 
-            void ensure(std::shared_ptr<plugin::HostServices> host_services, std::uint32_t kind, std::uint64_t requested_byte_size, std::string_view debug_name, std::string_view label);
+            void ensure(std::shared_ptr<plugin::HostServices> host_services, std::uint32_t kind, std::uint64_t requested_byte_size, std::string_view label);
             void reset() noexcept;
 
             [[nodiscard]] bool has_capacity(std::uint64_t requested_byte_size) const noexcept;
@@ -480,6 +480,7 @@ namespace hyfluid::project {
         std::uint64_t timeline_frame_count{};
         std::uint64_t scene_revision{1u};
         std::uint64_t exported_density_revision{};
+        std::uint64_t exported_occupancy_revision{};
         std::uint64_t exported_density_byte_size{};
         std::uint64_t current_timeline_frame_index{};
         double timeline_frame_rate{};
@@ -515,14 +516,14 @@ namespace hyfluid::project {
         return this->allocation.resource_id;
     }
 
-    void ExternalGpuBuffer::ensure(std::shared_ptr<plugin::HostServices> next_host_services, const std::uint32_t kind, const std::uint64_t requested_byte_size, const std::string_view debug_name, const std::string_view label) {
+    void ExternalGpuBuffer::ensure(std::shared_ptr<plugin::HostServices> next_host_services, const std::uint32_t kind, const std::uint64_t requested_byte_size, const std::string_view label) {
         if (this->has_capacity(requested_byte_size)) return;
         this->reset();
         if (next_host_services == nullptr) throw std::runtime_error{std::format("Spectra host services are required for {} visualization.", label)};
         if (requested_byte_size == 0u) throw std::runtime_error{std::format("{} byte size is invalid.", label)};
         if (!next_host_services->request_gpu_buffer) throw std::runtime_error{"Spectra host services request_gpu_buffer callback is not configured."};
         if (!next_host_services->release_gpu_buffer) throw std::runtime_error{"Spectra host services release_gpu_buffer callback is not configured."};
-        plugin::GpuBufferAllocation next_allocation = next_host_services->request_gpu_buffer(kind, requested_byte_size, debug_name);
+        plugin::GpuBufferAllocation next_allocation = next_host_services->request_gpu_buffer(kind, requested_byte_size);
         if (next_allocation.resource_id == 0u) throw std::runtime_error{std::format("Spectra returned an invalid {} resource id.", label)};
         if (next_allocation.kind != kind) throw std::runtime_error{std::format("Spectra returned an unexpected GPU buffer kind for {}.", label)};
         if (next_allocation.byte_size < requested_byte_size) {
@@ -674,6 +675,7 @@ namespace hyfluid::project {
         bool reset_occupancy_visualization(Project::State& state, const bool release_buffer) noexcept {
             const bool changed = state.occupancy_grid.has_value();
             state.occupancy_grid.reset();
+            state.exported_occupancy_revision = 0u;
             if (release_buffer) state.occupancy_buffer.reset();
             rebuild_debug_attachments(state);
             return changed;
@@ -709,7 +711,7 @@ namespace hyfluid::project {
             const std::uint64_t expected_revision = (static_cast<std::uint64_t>(state.latest_stats->step) << 32u) | timeline_frame_index;
             if (state.density_volume.has_value() && state.exported_density_revision == expected_revision) return;
 
-            state.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, byte_size, "hyfluid density time slice", "density volume");
+            state.density_buffer.ensure(state.host_services, plugin::GpuBufferKindVolumeChannel, byte_size, "density volume");
             float* const density_values = state.density_buffer.mapped_as<float>();
             if (density_values == nullptr) throw std::runtime_error{"HyFluid density volume external buffer was not mapped."};
 
@@ -741,14 +743,12 @@ namespace hyfluid::project {
                     {
                         plugin::VolumeChannel{
                             .name                    = "density",
-                            .dimensions              = dimensions,
                             .format                  = plugin::VolumeChannelFormat::Float32,
                             .source_kind             = plugin::VolumeChannelSourceKind::ExternalGpuBuffer,
                             .index_encoding          = plugin::VolumeChannelIndexEncoding::Morton3D,
                             .buffer_id               = state.density_buffer.resource_id(),
                             .external_device_pointer = reinterpret_cast<std::uintptr_t>(density_values),
                             .source_byte_size        = stats->byte_size,
-                            .revision                = stats->revision,
                         },
                     },
                 .material_name = density_material_name,
@@ -773,7 +773,7 @@ namespace hyfluid::project {
             if (view.bin_index != bin_index || view.bin_count != state.timeline_frame_count) throw std::runtime_error{"HyFluid occupancy grid view does not match timeline frame index."};
             const std::array color{0.12f, 0.78f, 1.0f, state.debug.occupancy_alpha};
             const std::uint64_t occupancy_visualization_revision = (static_cast<std::uint64_t>(state.latest_stats->step) << 32u) | bin_index;
-            if (state.occupancy_grid.has_value() && state.occupancy_grid->revision == occupancy_visualization_revision) {
+            if (state.occupancy_grid.has_value() && state.exported_occupancy_revision == occupancy_visualization_revision) {
                 const bool changed               = state.occupancy_grid->color != color || state.occupancy_grid->cell_scale != state.debug.occupancy_cell_scale;
                 state.occupancy_grid->color      = color;
                 state.occupancy_grid->cell_scale = state.debug.occupancy_cell_scale;
@@ -781,7 +781,7 @@ namespace hyfluid::project {
                 return changed;
             }
 
-            state.occupancy_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, view.bitfield_bytes, "hyfluid occupancy grid bitfield", "occupancy grid");
+            state.occupancy_buffer.ensure(state.host_services, plugin::GpuBufferKindViewportVoxelGrid, view.bitfield_bytes, "occupancy grid");
             std::uint8_t* const occupancy_bitfield = state.occupancy_buffer.mapped_as<std::uint8_t>();
             if (occupancy_bitfield == nullptr) throw std::runtime_error{"HyFluid occupancy grid bitfield external buffer was not mapped."};
             if (const cudaError_t status = cudaMemcpy(occupancy_bitfield, view.bitfield, view.bitfield_bytes, cudaMemcpyDeviceToDevice); status != cudaSuccess) throw std::runtime_error{std::string{"cudaMemcpy HyFluid occupancy grid bitfield failed: "} + cudaGetErrorString(status)};
@@ -801,8 +801,8 @@ namespace hyfluid::project {
                              .index_encoding   = plugin::ViewportVoxelGridIndexEncoding::Morton3D,
                              .buffer_id        = state.occupancy_buffer.resource_id(),
                              .source_byte_size = view.bitfield_bytes,
-                             .revision         = occupancy_visualization_revision,
             };
+            state.exported_occupancy_revision = occupancy_visualization_revision;
             rebuild_debug_attachments(state);
             return true;
         }
@@ -953,13 +953,19 @@ namespace hyfluid::project {
         std::vector<plugin::Light> lights{};
         if (this->state->debug.show_volume) {
             materials.push_back(plugin::Material{
-                .name                     = density_material_name,
-                .model                    = "volume",
-                .alpha_mode               = "blend",
-                .base_color               = {1.0f, 1.0f, 1.0f, 1.0f},
-                .roughness                = 0.35f,
-                .volume_density_scale     = static_cast<float>(inspector::DensitySliceDimension) * this->state->debug.density_scale,
-                .volume_temperature_scale = 1.0f,
+                .name = density_material_name,
+                .model = "volume",
+                .alpha_mode = "blend",
+                .base_color = {1.0f, 1.0f, 1.0f, 1.0f},
+                .roughness = 0.35f,
+                .volume = plugin::VolumeMaterial{
+                    .mode = plugin::VolumeMaterialMode::Medium,
+                    .density = plugin::VolumeChannelBinding{
+                        .channel_name = "density",
+                        .scale = static_cast<float>(inspector::DensitySliceDimension) * this->state->debug.density_scale,
+                        .enabled = true,
+                    },
+                },
             });
             lights.push_back(plugin::Light{
                 .name      = density_light_name,
@@ -997,7 +1003,6 @@ namespace hyfluid::project {
 
     void Project::write_frame(plugin::SceneBuilder& scene, const plugin::FrameInfo frame) {
         if (this->state == nullptr) throw std::runtime_error{"HyFluid project is not open."};
-        if (!std::isfinite(frame.delta_seconds) || frame.delta_seconds < 0.0) throw std::runtime_error{"HyFluid project frame delta time is invalid."};
         if (!std::isfinite(frame.time_seconds) || frame.time_seconds < 0.0) throw std::runtime_error{"HyFluid project frame time is invalid."};
         if (frame.frame_index >= this->state->timeline_frame_count) throw std::runtime_error{"HyFluid project frame index is outside indexed timeline."};
         this->state->current_timeline_frame_index = frame.frame_index;
@@ -1134,6 +1139,6 @@ namespace hyfluid::project {
     }
 } // namespace hyfluid::project
 
-extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v17(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
+extern "C" SPECTRA_SCENE_EXPORT auto spectra_scene_plugin_v18(void) -> decltype(hyfluid::plugin::export_plugin<hyfluid::project::Project>()) {
     return hyfluid::plugin::export_plugin<hyfluid::project::Project>();
 }
